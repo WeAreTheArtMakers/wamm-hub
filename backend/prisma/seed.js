@@ -302,6 +302,10 @@ async function seedCatalog() {
     );
     const genreId = genreIdByName.get(track.genre);
 
+    const rng = createRng(`${track.id}:${i}`);
+    const seededPlays = 1_000 + Math.floor(rng() * 4_001);
+    const seededLikes = 50 + Math.floor(rng() * 201);
+
     await prisma.track.create({
       data: {
         id: track.id,
@@ -322,8 +326,8 @@ async function seedCatalog() {
         currency: "USD",
         isForSale: true,
         sourcePath: track.sourcePath,
-        plays: 4_000 + i * 320,
-        likes: 180 + i * 18,
+        plays: seededPlays,
+        likes: seededLikes,
         createdAt: now(),
       },
     });
