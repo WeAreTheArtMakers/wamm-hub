@@ -18,6 +18,7 @@ backend/prisma/init.sql
 backend/.cache/
 public/generated/
 tmp/
+content/uploads/
 
 # Editor directories and files
 .vscode/*
