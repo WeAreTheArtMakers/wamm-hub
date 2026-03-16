@@ -73,8 +73,12 @@ const buildFrontendBaseUrl = () =>
     "http://localhost:8080"
   ).replace(/\/$/, "");
 
+const DEFAULT_GOOGLE_CLIENT_ID =
+  "535808035791-333ln95k5jb6upmvsi99tmvflm0c11ue.apps.googleusercontent.com";
+
 const getGoogleConfig = () => {
-  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientId =
+    process.env.GOOGLE_CLIENT_ID?.trim() || DEFAULT_GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
   const redirectUri =
     process.env.GOOGLE_REDIRECT_URI?.trim() ||
