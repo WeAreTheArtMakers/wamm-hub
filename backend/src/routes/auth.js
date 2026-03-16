@@ -51,6 +51,15 @@ const asyncHandler =
 const authStateSecret =
   process.env.AUTH_STATE_SECRET ?? process.env.AUTH_SECRET ?? "wamm-hub-auth-state";
 
+const createPkcePair = () => {
+  const verifier = crypto.randomBytes(48).toString("base64url");
+  const challenge = crypto
+    .createHash("sha256")
+    .update(verifier)
+    .digest("base64url");
+  return { verifier, challenge };
+};
+
 const buildApiBaseUrl = () =>
   (
     process.env.PUBLIC_BASE_URL ??
@@ -66,13 +75,18 @@ const buildFrontendBaseUrl = () =>
 
 const getGoogleConfig = () => {
   const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
   const redirectUri =
     process.env.GOOGLE_REDIRECT_URI?.trim() ||
     `${buildApiBaseUrl()}/api/auth/google/callback`;
 
-  if (!clientId || !clientSecret) return null;
-  return { clientId, clientSecret, redirectUri };
+  if (!clientId) return null;
+  return {
+    clientId,
+    clientSecret,
+    redirectUri,
+    usePkce: clientSecret.length === 0,
+  };
 };
 
 const sanitizeReturnTo = (candidate) => {
@@ -134,10 +148,12 @@ router.get(
     }
 
     const returnTo = sanitizeReturnTo(req.query.returnTo);
+    const pkce = googleConfig.usePkce ? createPkcePair() : null;
     const state = signState({
       returnTo,
       nonce: crypto.randomBytes(8).toString("hex"),
       iat: Date.now(),
+      pkceVerifier: pkce?.verifier ?? null,
     });
 
     const authParams = new URLSearchParams({
@@ -149,6 +165,10 @@ router.get(
       prompt: "consent",
       state,
     });
+    if (pkce) {
+      authParams.set("code_challenge_method", "S256");
+      authParams.set("code_challenge", pkce.challenge);
+    }
 
     res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${authParams}`);
   }),
@@ -177,16 +197,31 @@ router.get(
 
     const returnTo = sanitizeReturnTo(statePayload.returnTo);
 
+    const tokenRequestBody = new URLSearchParams({
+      code,
+      client_id: googleConfig.clientId,
+      redirect_uri: googleConfig.redirectUri,
+      grant_type: "authorization_code",
+    });
+    if (googleConfig.clientSecret) {
+      tokenRequestBody.set("client_secret", googleConfig.clientSecret);
+    }
+    if (googleConfig.usePkce) {
+      const pkceVerifier =
+        typeof statePayload.pkceVerifier === "string"
+          ? statePayload.pkceVerifier
+          : "";
+      if (!pkceVerifier) {
+        redirectToLoginWithError(res, "Google sign-in failed (missing PKCE verifier).");
+        return;
+      }
+      tokenRequestBody.set("code_verifier", pkceVerifier);
+    }
+
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: googleConfig.clientId,
-        client_secret: googleConfig.clientSecret,
-        redirect_uri: googleConfig.redirectUri,
-        grant_type: "authorization_code",
-      }),
+      body: tokenRequestBody,
     });
 
     if (!tokenResponse.ok) {

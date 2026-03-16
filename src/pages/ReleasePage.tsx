@@ -32,6 +32,7 @@ export default function ReleasePage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MANUAL");
   const [walletAddress, setWalletAddress] = useState("");
   const [ibanReference, setIbanReference] = useState("");
+  const [waveTrackId, setWaveTrackId] = useState<string | null>(null);
   const [downloadItems, setDownloadItems] = useState<
     Array<{ trackId: string; title: string; url: string; format: string }>
   >([]);
@@ -82,6 +83,12 @@ export default function ReleasePage() {
     }
   }, [release, hasIban, hasWallet, paymentMethod]);
 
+  useEffect(() => {
+    if (!release) return;
+    const ids = (release.tracks ?? []).map((track) => track.id);
+    setWaveTrackId((prev) => (prev && ids.includes(prev) ? prev : ids[0] ?? null));
+  }, [release]);
+
   if (isLoading) {
     return (
       <div className="max-w-[1400px] mx-auto px-4 py-20 text-center">
@@ -110,6 +117,8 @@ export default function ReleasePage() {
     release.totalLikes ?? releaseTracks.reduce((sum, track) => sum + track.likes, 0);
   const platformFee = release.price * PLATFORM_FEE_RATE;
   const artistNet = release.price - platformFee;
+  const waveformTrack =
+    releaseTracks.find((track) => track.id === waveTrackId) || releaseTracks[0] || null;
 
   const handlePlayAll = () => {
     if (releaseTracks.length === 0) return;
@@ -386,26 +395,30 @@ export default function ReleasePage() {
           </button>
 
           <div className="razor-border overflow-hidden">
-            <TrackList tracks={releaseTracks} showArtist={false} />
+            <TrackList
+              tracks={releaseTracks}
+              showArtist={false}
+              onTrackSelect={(track) => setWaveTrackId(track.id)}
+            />
           </div>
 
-          {releaseTracks.length > 0 && (
+          {waveformTrack && (
             <div className="space-y-2">
               <span className="font-mono-data text-muted-foreground">
-                {releaseTracks[0].title} — Waveform
+                {waveformTrack.title} — Waveform Comments
               </span>
               <div className="razor-border p-2 sm:p-3">
                 <WaveformDisplay
-                  waveform={releaseTracks[0].waveform}
-                  duration={releaseTracks[0].duration}
-                  trackId={releaseTracks[0].id}
-                  comments={releaseTracks[0].comments}
+                  waveform={waveformTrack.waveform}
+                  duration={waveformTrack.duration}
+                  trackId={waveformTrack.id}
+                  comments={waveformTrack.comments}
                   height={72}
                 />
               </div>
-              {releaseTracks[0].comments.length > 0 && (
+              {waveformTrack.comments.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {releaseTracks[0].comments.slice(0, 5).map((comment) => (
+                  {waveformTrack.comments.slice(0, 6).map((comment) => (
                     <span
                       key={comment.id}
                       className="text-xs text-muted-foreground razor-border px-2 py-1"

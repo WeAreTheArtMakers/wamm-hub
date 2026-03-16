@@ -18,6 +18,7 @@ import {
   serializeRelease,
   serializeTrack,
 } from "../lib/serializers.js";
+import { uploadFileToRemote } from "../lib/remote-storage.js";
 import { humanizeSlug, slugify } from "../lib/text.js";
 
 const router = Router();
@@ -274,6 +275,33 @@ const moveFile = async (sourcePath, destinationPath) => {
   }
 };
 
+const uploadToRemoteWithFallback = async ({
+  localFilePath,
+  localUrl,
+  artistSlug,
+  releaseSlug,
+  trackSlug,
+  kind,
+  fileName,
+  mimeType,
+}) => {
+  try {
+    const remoteUrl = await uploadFileToRemote({
+      localFilePath,
+      artistSlug,
+      releaseSlug,
+      trackSlug,
+      kind,
+      fileName,
+      mimeType,
+    });
+    return remoteUrl || localUrl;
+  } catch (error) {
+    console.warn("Remote upload skipped, using local media:", error.message);
+    return localUrl;
+  }
+};
+
 const parseTrackMetadata = async (filePath) => {
   try {
     const metadata = await parseFile(filePath, { duration: true, skipCovers: false });
@@ -430,7 +458,16 @@ router.patch(
       const fileName = `${artist.slug}-avatar-${Date.now()}.${ext}`;
       const target = path.join(generatedArtistsRoot, fileName);
       await moveFile(avatarUpload.path, target);
-      updateData.avatarUrl = `/generated/artists/${fileName}`;
+      updateData.avatarUrl = await uploadToRemoteWithFallback({
+        localFilePath: target,
+        localUrl: `/generated/artists/${fileName}`,
+        artistSlug: artist.slug,
+        releaseSlug: "profile",
+        trackSlug: "avatar",
+        kind: "artist-avatar",
+        fileName,
+        mimeType: avatarUpload.mimetype,
+      });
     }
 
     if (bannerUpload) {
@@ -440,7 +477,16 @@ router.patch(
       const fileName = `${artist.slug}-banner-${Date.now()}.${ext}`;
       const target = path.join(generatedArtistsRoot, fileName);
       await moveFile(bannerUpload.path, target);
-      updateData.bannerUrl = `/generated/artists/${fileName}`;
+      updateData.bannerUrl = await uploadToRemoteWithFallback({
+        localFilePath: target,
+        localUrl: `/generated/artists/${fileName}`,
+        artistSlug: artist.slug,
+        releaseSlug: "profile",
+        trackSlug: "banner",
+        kind: "artist-banner",
+        fileName,
+        mimeType: bannerUpload.mimetype,
+      });
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -524,7 +570,16 @@ router.post(
       const coverFileName = `${artist.slug}-${releaseSlug}.${ext}`;
       const coverPath = path.join(GENERATED_COVERS_ROOT, coverFileName);
       await moveFile(coverUpload.path, coverPath);
-      releaseCoverUrl = `/generated/covers/${coverFileName}`;
+      releaseCoverUrl = await uploadToRemoteWithFallback({
+        localFilePath: coverPath,
+        localUrl: `/generated/covers/${coverFileName}`,
+        artistSlug: artist.slug,
+        releaseSlug,
+        trackSlug: "release-cover",
+        kind: "release-cover",
+        fileName: coverFileName,
+        mimeType: coverUpload.mimetype,
+      });
     }
 
     const releaseId = `release_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -589,13 +644,32 @@ router.post(
 
       const metadata = await parseTrackMetadata(originalPath);
       let trackCoverUrl = releaseCoverUrl;
+      const streamUrl = await uploadToRemoteWithFallback({
+        localFilePath: originalPath,
+        localUrl: toMediaUrl(originalPath),
+        artistSlug: artist.slug,
+        releaseSlug,
+        trackSlug,
+        kind: "track-audio",
+        fileName: originalFileName,
+        mimeType: file.mimetype,
+      });
 
       if (!trackCoverUrl && metadata.picture?.data?.length) {
         const ext = extFromMime(metadata.picture.format);
         const coverFileName = `${artist.slug}-${releaseSlug}-${trackSlug}.${ext}`;
         const coverPath = path.join(GENERATED_COVERS_ROOT, coverFileName);
         await fs.writeFile(coverPath, metadata.picture.data);
-        trackCoverUrl = `/generated/covers/${coverFileName}`;
+        trackCoverUrl = await uploadToRemoteWithFallback({
+          localFilePath: coverPath,
+          localUrl: `/generated/covers/${coverFileName}`,
+          artistSlug: artist.slug,
+          releaseSlug,
+          trackSlug,
+          kind: "track-cover",
+          fileName: coverFileName,
+          mimeType: metadata.picture.format,
+        });
       }
 
       if (!releaseCoverUrl && trackCoverUrl) {
@@ -618,7 +692,7 @@ router.post(
       });
 
       const trackId = `track_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`;
-      const duration = metadata.duration || 30;
+      const duration = Math.max(30, metadata.duration || 0);
       const plays = randomInt(1000, 5000);
       const likes = randomInt(50, 250);
 
@@ -629,10 +703,10 @@ router.post(
           releaseId,
           title: metadata.title || trackTitle,
           coverArtUrl: trackCoverUrl,
-          audioUrl: toMediaUrl(originalPath),
-          previewUrl: toMediaUrl(originalPath),
-          highQualityUrl: toMediaUrl(originalPath),
-          originalUrl: toMediaUrl(originalPath),
+          audioUrl: streamUrl,
+          previewUrl: streamUrl,
+          highQualityUrl: streamUrl,
+          originalUrl: streamUrl,
           duration,
           bpm: metadata.bpm,
           keySignature: metadata.key,
@@ -742,7 +816,16 @@ router.patch(
       const fileName = `${artist.slug}-${release.slug}-${Date.now()}.${ext}`;
       const target = path.join(GENERATED_COVERS_ROOT, fileName);
       await moveFile(req.file.path, target);
-      updateData.coverArtUrl = `/generated/covers/${fileName}`;
+      updateData.coverArtUrl = await uploadToRemoteWithFallback({
+        localFilePath: target,
+        localUrl: `/generated/covers/${fileName}`,
+        artistSlug: artist.slug,
+        releaseSlug: release.slug,
+        trackSlug: "release-cover",
+        kind: "release-cover",
+        fileName,
+        mimeType: req.file.mimetype,
+      });
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -850,7 +933,16 @@ router.patch(
       const fileName = `${artist.slug}-${slugify(track.title)}-${Date.now()}.${ext}`;
       const target = path.join(GENERATED_COVERS_ROOT, fileName);
       await moveFile(req.file.path, target);
-      updateData.coverArtUrl = `/generated/covers/${fileName}`;
+      updateData.coverArtUrl = await uploadToRemoteWithFallback({
+        localFilePath: target,
+        localUrl: `/generated/covers/${fileName}`,
+        artistSlug: artist.slug,
+        releaseSlug: track.releaseId ?? "single",
+        trackSlug: slugify(track.title),
+        kind: "track-cover",
+        fileName,
+        mimeType: req.file.mimetype,
+      });
     }
 
     if (Object.keys(updateData).length === 0) {

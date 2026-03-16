@@ -9,12 +9,20 @@ interface TrackListProps {
   showCover?: boolean;
   showArtist?: boolean;
   numbered?: boolean;
+  onTrackSelect?: (track: Track) => void;
 }
 
-export function TrackList({ tracks, showCover = false, showArtist = true, numbered = true }: TrackListProps) {
+export function TrackList({
+  tracks,
+  showCover = false,
+  showArtist = true,
+  numbered = true,
+  onTrackSelect,
+}: TrackListProps) {
   const { currentTrack, isPlaying, setTrack, togglePlay } = usePlayer();
 
   const handleTrackClick = (track: Track) => {
+    onTrackSelect?.(track);
     if (currentTrack?.id === track.id) {
       togglePlay();
     } else {
