@@ -1,11 +1,18 @@
 import { useRef, useCallback, useEffect, useMemo, useState } from "react";
 import { usePlayer } from "@/store/usePlayer";
+import { autoAvatarUrl } from "@/lib/avatar";
 
 interface WaveformDisplayProps {
   waveform: number[];
   duration: number;
   trackId: string;
-  comments?: { id: string; timestamp: number; content: string; username: string }[];
+  comments?: {
+    id: string;
+    timestamp: number;
+    content: string;
+    username: string;
+    avatarUrl?: string;
+  }[];
   height?: number;
 }
 
@@ -103,22 +110,13 @@ export function WaveformDisplay({
   };
 
   return (
-    <div className="space-y-2">
-      <div className="relative w-full group" ref={containerRef}>
-        {activeComment && (
-          <div className="absolute -top-16 left-0 right-0 z-20 px-1">
-            <div className="mx-auto max-w-full sm:max-w-[85%] razor-border bg-background/95 px-2 py-1.5 text-xs leading-snug">
-              <span className="font-mono-data text-accent mr-2">
-                {formatTime(activeComment.timestamp)} · {activeComment.username}
-              </span>
-              <span className="text-muted-foreground">{activeComment.content}</span>
-            </div>
-          </div>
-        )}
-
+    <div className="space-y-3 min-w-0">
+      <div className="relative w-full group min-w-0 overflow-hidden" ref={containerRef}>
         <div
           onClick={handleWaveClick}
-          className={`relative flex items-end gap-px w-full ${isActive ? "cursor-pointer" : "cursor-default"}`}
+          className={`relative flex items-end gap-px w-full min-w-0 overflow-hidden ${
+            isActive ? "cursor-pointer" : "cursor-default"
+          }`}
           style={{ height }}
         >
           {bars.map((peak, i) => {
@@ -160,9 +158,28 @@ export function WaveformDisplay({
         </div>
       </div>
 
+      {activeComment && (
+        <div className="razor-border bg-background/70 p-2.5 sm:p-3 text-sm">
+          <div className="flex items-start gap-2">
+            <img
+              src={activeComment.avatarUrl || autoAvatarUrl(activeComment.username)}
+              alt={activeComment.username}
+              className="w-7 h-7 sm:w-8 sm:h-8 shrink-0 razor-border object-cover"
+              loading="lazy"
+            />
+            <div className="min-w-0">
+              <div className="font-mono-data text-accent">
+                {formatTime(activeComment.timestamp)} · {activeComment.username}
+              </div>
+              <p className="text-muted-foreground break-words">{activeComment.content}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {sortedComments.length > 0 && (
-        <div className="overflow-x-auto pb-1">
-          <div className="flex gap-2 min-w-max">
+        <div className="razor-border overflow-hidden">
+          <div className="max-h-[240px] sm:max-h-[280px] overflow-y-auto divide-y divide-border">
             {sortedComments.map((comment) => {
               const isCurrent = activeComment?.id === comment.id;
               return (
@@ -173,13 +190,26 @@ export function WaveformDisplay({
                     setPinnedCommentId(comment.id);
                     seekToComment(comment.timestamp);
                   }}
-                  className={`text-xs razor-border px-2 py-1 text-left whitespace-nowrap transition-colors ${
-                    isCurrent
-                      ? "text-accent border-accent/50"
-                      : "text-muted-foreground hover:text-foreground"
+                  className={`w-full text-left p-2.5 sm:p-3 transition-colors ${
+                    isCurrent ? "bg-foreground/10" : "hover:bg-foreground/5"
                   }`}
                 >
-                  {formatTime(comment.timestamp)} · {comment.username}
+                  <div className="flex items-start gap-2">
+                    <img
+                      src={comment.avatarUrl || autoAvatarUrl(comment.username)}
+                      alt={comment.username}
+                      className="w-6 h-6 sm:w-7 sm:h-7 shrink-0 razor-border object-cover"
+                      loading="lazy"
+                    />
+                    <div className="min-w-0">
+                      <div className="font-mono-data text-accent">
+                        {formatTime(comment.timestamp)} · {comment.username}
+                      </div>
+                      <p className="text-xs sm:text-sm text-muted-foreground break-words">
+                        {comment.content}
+                      </p>
+                    </div>
+                  </div>
                 </button>
               );
             })}

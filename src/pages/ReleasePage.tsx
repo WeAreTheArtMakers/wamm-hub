@@ -571,11 +571,11 @@ export default function ReleasePage() {
           </div>
 
           {waveformTrack && (
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <span className="font-mono-data text-muted-foreground">
                 {waveformTrack.title} — Waveform Comments
               </span>
-              <div className="razor-border p-2 sm:p-3">
+              <div className="razor-border p-2 sm:p-3 min-w-0 overflow-hidden">
                 <WaveformDisplay
                   waveform={waveformTrack.waveform}
                   duration={waveformTrack.duration}
@@ -584,18 +584,6 @@ export default function ReleasePage() {
                   height={72}
                 />
               </div>
-              {waveformTrack.comments.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {waveformTrack.comments.slice(0, 6).map((comment) => (
-                    <span
-                      key={comment.id}
-                      className="text-xs text-muted-foreground razor-border px-2 py-1"
-                    >
-                      {comment.timestamp}s · {comment.username}
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
           )}
         </div>

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { loadWammCatalog } from "../src/lib/content-import.js";
+import { buildAutoAvatarUrl } from "../src/lib/avatar.js";
 
 const prisma = new PrismaClient();
 const DEFAULT_PASSWORD = "password123";
@@ -165,7 +166,7 @@ const buildTrackComments = (track, trackIndex) => {
       trackId: track.id,
       userId: user.id,
       username: user.username,
-      avatarUrl: "",
+      avatarUrl: buildAutoAvatarUrl(user.username),
       content: createCommentText(rng),
       timestamp,
       createdAt,

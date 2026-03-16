@@ -1,3 +1,5 @@
+import { buildAutoAvatarUrl } from "./avatar.js";
+
 const formatDate = (value) => {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
@@ -18,7 +20,9 @@ export const serializeComment = (comment) => ({
   id: comment.id,
   userId: comment.userId ?? "",
   username: comment.username,
-  avatarUrl: comment.avatarUrl ?? "",
+  avatarUrl:
+    comment.avatarUrl ||
+    buildAutoAvatarUrl(comment.username || comment.userId || comment.id),
   content: comment.content,
   timestamp: comment.timestamp,
   createdAt: formatDate(comment.createdAt),
@@ -97,7 +101,7 @@ export const serializeArtist = (artist, trackCount) => ({
   name: artist.name,
   slug: artist.slug,
   bio: artist.bio,
-  avatarUrl: artist.avatarUrl ?? "",
+  avatarUrl: artist.avatarUrl || buildAutoAvatarUrl(artist.slug || artist.name),
   bannerUrl: artist.bannerUrl ?? "",
   verified: artist.verified,
   location: artist.location,

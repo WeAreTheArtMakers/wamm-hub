@@ -23,6 +23,7 @@ import {
   isRemoteUploadStrict,
   uploadFileToRemote,
 } from "../lib/remote-storage.js";
+import { buildAutoAvatarUrl } from "../lib/avatar.js";
 import { humanizeSlug, slugify } from "../lib/text.js";
 
 const router = Router();
@@ -289,7 +290,7 @@ const buildAutoComments = ({ trackId, duration, profiles }) => {
       trackId,
       userId: profile.userId,
       username: profile.username,
-      avatarUrl: "",
+      avatarUrl: buildAutoAvatarUrl(profile.username),
       content: createCommentText(rng),
       timestamp,
       createdAt,
