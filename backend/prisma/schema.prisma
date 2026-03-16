@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  LISTENER
+  ARTIST
+}
+
+enum ReleaseType {
+  SINGLE
+  EP
+  ALBUM
+}
+
+enum ReleaseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  UNDER_REVIEW
+  PAID
+  FULFILLED
+  FAILED
+}
+
+enum PaymentMethod {
+  STRIPE
+  CRYPTO
+  MANUAL
+}
+
+model User {
+  id           String         @id @default(cuid())
+  email        String         @unique
+  passwordHash String
+  role         UserRole       @default(LISTENER)
+  ownedArtist  Artist?        @relation("ArtistOwner")
+  comments     TrackComment[]
+  orders       Order[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Artist {
+  id               String       @id @default(cuid())
+  name             String
+  slug             String       @unique
+  bio              String
+  ownerUserId      String?      @unique
+  avatarUrl        String?
+  bannerUrl        String?
+  verified         Boolean      @default(false)
+  location         String
+  followers        Int          @default(0)
+  monthlyListeners Int          @default(0)
+  ownerUser        User?        @relation("ArtistOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  genres           ArtistGenre[]
+  releases         Release[]
+  tracks           Track[]
+  tourDates        TourDate[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model Genre {
+  id            String         @id @default(cuid())
+  name          String         @unique
+  artistGenres  ArtistGenre[]
+  releaseGenres ReleaseGenre[]
+  tracks        Track[]
+}
+
+model ArtistGenre {
+  artistId String
+  genreId  String
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  genre    Genre  @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([artistId, genreId])
+}
+
+model Release {
+  id          String         @id
+  title       String
+  slug        String         @unique
+  artistId    String
+  type        ReleaseType
+  status      ReleaseStatus  @default(DRAFT)
+  coverArtUrl String?
+  description String
+  price       Float
+  currency    String         @default("USD")
+  isForSale   Boolean        @default(true)
+  sourceRepo  String?
+  releaseDate DateTime
+  published   Boolean        @default(false)
+  featured    Boolean        @default(false)
+  artist      Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  genres      ReleaseGenre[]
+  tracks      Track[]
+  orders      Order[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([artistId])
+}
+
+model ReleaseGenre {
+  releaseId String
+  genreId   String
+  release   Release @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  genre     Genre   @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([releaseId, genreId])
+}
+
+model Track {
+  id          String         @id
+  title       String
+  artistId    String
+  releaseId   String?
+  coverArtUrl String?
+  audioUrl    String
+  previewUrl  String?
+  highQualityUrl String?
+  originalUrl String?
+  duration    Int
+  bpm         Int?
+  keySignature String?
+  genreId     String?
+  waveformJson String
+  price       Float          @default(0.99)
+  currency    String         @default("USD")
+  isForSale   Boolean        @default(true)
+  sourcePath  String?
+  plays       Int            @default(0)
+  likes       Int            @default(0)
+  createdAt   DateTime
+  artist      Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  release     Release?       @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  genre       Genre?         @relation(fields: [genreId], references: [id], onDelete: SetNull)
+  comments    TrackComment[]
+  orders      Order[]
+
+  @@index([artistId])
+  @@index([releaseId])
+  @@index([genreId])
+}
+
+model TrackComment {
+  id        String   @id
+  trackId   String
+  userId    String?
+  username  String
+  avatarUrl String?
+  content   String
+  timestamp Int
+  createdAt DateTime
+  track     Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([trackId])
+  @@index([userId])
+}
+
+model TourDate {
+  id       String   @id
+  artistId String
+  date     DateTime
+  venue    String
+  city     String
+  country  String
+  ticketUrl String?
+  artist   Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@index([artistId])
+}
+
+model Order {
+  id           String        @id
+  userId       String
+  releaseId    String?
+  trackId      String?
+  releaseTitle String
+  artistName   String
+  status       OrderStatus
+  totalAmount  Float
+  platformFee  Float
+  artistPayout Float
+  paymentMethod PaymentMethod
+  cryptoTxHash String?
+  createdAt    DateTime
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  release      Release?      @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  track        Track?        @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([releaseId])
+  @@index([trackId])
+}

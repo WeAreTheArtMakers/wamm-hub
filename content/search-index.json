@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-02-28T11:15:38.416Z",
+  "items": [
+    {
+      "type": "release",
+      "artist": "demo-artist",
+      "slug": "first-light",
+      "title": {
+        "en": "First Light",
+        "tr": "İlk Işık"
+      },
+      "license": "All rights reserved",
+      "sourceRepo": "local"
+    }
+  ]
+}

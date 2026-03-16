@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-02-28T11:15:38.416Z",
+  "artists": [
+    {
+      "slug": "Baran-Gulesen",
+      "sourceRepo": "local",
+      "releaseCount": 0
+    },
+    {
+      "slug": "demo-artist",
+      "sourceRepo": "local",
+      "releaseCount": 1
+    }
+  ]
+}
