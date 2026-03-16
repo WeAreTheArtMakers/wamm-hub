@@ -214,6 +214,24 @@ async function seedCatalog() {
 }
 
 async function main() {
+  const reset = process.env.SEED_RESET === "true";
+
+  if (!reset) {
+    const [artistCount, releaseCount, trackCount] = await Promise.all([
+      prisma.artist.count(),
+      prisma.release.count(),
+      prisma.track.count(),
+    ]);
+
+    const hasCatalogData =
+      artistCount > 0 && releaseCount > 0 && trackCount > 0;
+
+    if (hasCatalogData) {
+      console.log("Seed skipped: existing catalog detected.");
+      return;
+    }
+  }
+
   await clearDatabase();
   await seedUsers();
   await seedCatalog();
