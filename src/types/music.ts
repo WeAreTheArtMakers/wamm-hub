@@ -12,6 +12,12 @@ export interface Artist {
   monthlyListeners: number;
   trackCount: number;
   ownerUserId?: string;
+  paymentSettings: {
+    iban: string;
+    ibanName: string;
+    wallet: string;
+    network: string;
+  };
 }
 
 export interface TrackComment {
@@ -58,6 +64,12 @@ export interface Release {
   artistId: string;
   artistName: string;
   artistSlug: string;
+  artistPayment: {
+    iban: string;
+    ibanName: string;
+    wallet: string;
+    network: string;
+  };
   type: "SINGLE" | "EP" | "ALBUM";
   coverArtUrl: string;
   description: string;
@@ -174,12 +186,9 @@ export interface OrderDownloadsResponse {
 }
 
 export interface StudioDashboardResponse {
-  artist: {
-    id: string;
-    name: string;
-    slug: string;
-  };
+  artist: Artist;
   releases: Release[];
+  tracks: Track[];
   recentOrders: Order[];
 }
 

@@ -63,6 +63,12 @@ export const serializeRelease = (release) => {
     artistId: release.artistId,
     artistName: release.artist?.name ?? "",
     artistSlug: release.artist?.slug ?? "",
+    artistPayment: {
+      iban: release.artist?.payoutIban ?? "",
+      ibanName: release.artist?.payoutIbanName ?? "",
+      wallet: release.artist?.payoutWallet ?? "",
+      network: release.artist?.payoutNetwork ?? "",
+    },
     type: release.type,
     coverArtUrl: release.coverArtUrl ?? "",
     description: release.description,
@@ -100,6 +106,12 @@ export const serializeArtist = (artist, trackCount) => ({
       ? trackCount
       : artist._count?.tracks ?? 0,
   ownerUserId: artist.ownerUserId ?? undefined,
+  paymentSettings: {
+    iban: artist.payoutIban ?? "",
+    ibanName: artist.payoutIbanName ?? "",
+    wallet: artist.payoutWallet ?? "",
+    network: artist.payoutNetwork ?? "",
+  },
 });
 
 export const serializeTourDate = (tourDate) => ({

@@ -16,7 +16,17 @@ const trackInclude = {
 };
 
 const releaseInclude = {
-  artist: { select: { id: true, name: true, slug: true } },
+  artist: {
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      payoutIban: true,
+      payoutIbanName: true,
+      payoutWallet: true,
+      payoutNetwork: true,
+    },
+  },
   genres: { include: { genre: true } },
   tracks: { include: trackInclude, orderBy: { createdAt: "asc" } },
 };

@@ -2,10 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, MapPin, CheckCircle, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ReleaseCard } from "@/components/music/ReleaseCard";
 import { TrackList } from "@/components/music/TrackList";
 import { api } from "@/lib/api";
+import { getSessionUser } from "@/lib/auth";
 import { formatNumber } from "@/lib/music";
 
 type Tab = "releases" | "tracks" | "about" | "tour";
@@ -13,6 +14,7 @@ type Tab = "releases" | "tracks" | "about" | "tour";
 export default function ArtistProfilePage() {
   const { slug } = useParams<{ slug: string }>();
   const [activeTab, setActiveTab] = useState<Tab>("releases");
+  const sessionUser = useMemo(() => getSessionUser(), []);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["artist", slug],
@@ -66,7 +68,7 @@ export default function ArtistProfilePage() {
           <ArrowLeft className="w-3 h-3" /> Back
         </Link>
 
-        <div className="flex items-end gap-4 -mt-12 mb-8 relative z-10">
+        <div className="flex items-start sm:items-end gap-3 sm:gap-4 -mt-10 sm:-mt-12 mb-8 relative z-10">
           <div className="w-24 h-24 md:w-32 md:h-32 bg-secondary razor-border overflow-hidden flex-shrink-0">
             {artist.avatarUrl ? (
               <img src={artist.avatarUrl} alt={artist.name} className="w-full h-full object-cover" />
@@ -78,12 +80,20 @@ export default function ArtistProfilePage() {
               </div>
             )}
           </div>
-          <div className="pb-1">
+          <div className="pb-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="font-display text-2xl md:text-3xl">{artist.name}</h1>
+              <h1 className="font-display text-2xl md:text-3xl truncate">{artist.name}</h1>
               {artist.verified && <CheckCircle className="w-4 h-4 text-accent" />}
+              {sessionUser?.role === "artist" && (
+                <Link
+                  to="/studio"
+                  className="ml-2 text-xs font-mono-data razor-border px-2 py-1 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Manage
+                </Link>
+              )}
             </div>
-            <div className="flex items-center gap-3 font-mono-data text-muted-foreground mt-1">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono-data text-muted-foreground mt-1">
               <span className="flex items-center gap-1">
                 <MapPin className="w-2.5 h-2.5" /> {artist.location}
               </span>

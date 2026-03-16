@@ -62,6 +62,10 @@ model Artist {
   location         String
   followers        Int          @default(0)
   monthlyListeners Int          @default(0)
+  payoutIban       String?
+  payoutIbanName   String?
+  payoutWallet     String?
+  payoutNetwork    String?
   ownerUser        User?        @relation("ArtistOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   genres           ArtistGenre[]
   releases         Release[]

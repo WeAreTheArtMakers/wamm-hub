@@ -216,6 +216,18 @@ async function seedCatalog() {
         followers: artist.followers,
         monthlyListeners: artist.monthlyListeners,
         ownerUserId: artistOwnerBySlug.get(artist.slug),
+        payoutIban:
+          artist.slug === "baran-gulesen"
+            ? "TR12 0006 7010 0000 0000 0000 00"
+            : null,
+        payoutIbanName:
+          artist.slug === "baran-gulesen" ? "Baran Gulesen" : null,
+        payoutWallet:
+          artist.slug === "baran-gulesen"
+            ? "0x7f6e51c6b96528d5f95f8e42f04fe4b8f49dd0af"
+            : null,
+        payoutNetwork:
+          artist.slug === "baran-gulesen" ? "Ethereum / Base" : null,
       },
     });
 

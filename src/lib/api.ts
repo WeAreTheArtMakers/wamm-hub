@@ -194,4 +194,113 @@ export const api = {
       `/api/studio/releases/${encodeURIComponent(releaseId)}/publish`,
       { method: "POST" },
     ),
+
+  updateStudioProfile: (payload: {
+    name?: string;
+    bio?: string;
+    location?: string;
+    payoutIban?: string;
+    payoutIbanName?: string;
+    payoutWallet?: string;
+    payoutNetwork?: string;
+    avatar?: File;
+    banner?: File;
+    clearAvatar?: boolean;
+    clearBanner?: boolean;
+  }) => {
+    const formData = new FormData();
+    if (typeof payload.name === "string") formData.append("name", payload.name);
+    if (typeof payload.bio === "string") formData.append("bio", payload.bio);
+    if (typeof payload.location === "string") formData.append("location", payload.location);
+    if (typeof payload.payoutIban === "string") {
+      formData.append("payoutIban", payload.payoutIban);
+    }
+    if (typeof payload.payoutIbanName === "string") {
+      formData.append("payoutIbanName", payload.payoutIbanName);
+    }
+    if (typeof payload.payoutWallet === "string") {
+      formData.append("payoutWallet", payload.payoutWallet);
+    }
+    if (typeof payload.payoutNetwork === "string") {
+      formData.append("payoutNetwork", payload.payoutNetwork);
+    }
+    if (payload.avatar) formData.append("avatar", payload.avatar);
+    if (payload.banner) formData.append("banner", payload.banner);
+    if (payload.clearAvatar) formData.append("clearAvatar", "true");
+    if (payload.clearBanner) formData.append("clearBanner", "true");
+
+    return request<{ message: string; artist: Artist }>(
+      "/api/studio/profile",
+      {
+        method: "PATCH",
+        body: formData,
+      },
+    );
+  },
+
+  updateStudioRelease: (
+    releaseId: string,
+    payload: {
+      title?: string;
+      description?: string;
+      price?: number;
+      isForSale?: boolean;
+      status?: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+      cover?: File;
+    },
+  ) => {
+    const formData = new FormData();
+    if (typeof payload.title === "string") formData.append("title", payload.title);
+    if (typeof payload.description === "string") {
+      formData.append("description", payload.description);
+    }
+    if (typeof payload.price === "number") formData.append("price", String(payload.price));
+    if (typeof payload.isForSale === "boolean") {
+      formData.append("isForSale", payload.isForSale ? "true" : "false");
+    }
+    if (payload.status) formData.append("status", payload.status);
+    if (payload.cover) formData.append("cover", payload.cover);
+
+    return request<{ message: string; release: Release }>(
+      `/api/studio/releases/${encodeURIComponent(releaseId)}`,
+      {
+        method: "PATCH",
+        body: formData,
+      },
+    );
+  },
+
+  updateStudioTrack: (
+    trackId: string,
+    payload: {
+      title?: string;
+      genre?: string;
+      price?: number;
+      bpm?: number;
+      keySignature?: string;
+      isForSale?: boolean;
+      cover?: File;
+    },
+  ) => {
+    const formData = new FormData();
+    if (typeof payload.title === "string") formData.append("title", payload.title);
+    if (typeof payload.genre === "string") formData.append("genre", payload.genre);
+    if (typeof payload.price === "number") formData.append("price", String(payload.price));
+    if (typeof payload.bpm === "number") formData.append("bpm", String(payload.bpm));
+    if (typeof payload.keySignature === "string") {
+      formData.append("keySignature", payload.keySignature);
+    }
+    if (typeof payload.isForSale === "boolean") {
+      formData.append("isForSale", payload.isForSale ? "true" : "false");
+    }
+    if (payload.cover) formData.append("cover", payload.cover);
+
+    return request<{ message: string; track: Track }>(
+      `/api/studio/tracks/${encodeURIComponent(trackId)}`,
+      {
+        method: "PATCH",
+        body: formData,
+      },
+    );
+  },
 };

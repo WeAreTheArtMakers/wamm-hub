@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   Play,
@@ -24,22 +24,6 @@ const PLATFORM_FEE_RATE = 0.03;
 type PaymentMethod = "MANUAL" | "CRYPTO";
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
-};
-
-const getArtistPaymentInfo = (artistSlug: string) => {
-  if (artistSlug === "baran-gulesen") {
-    return {
-      beneficiary: "Baran Gulesen",
-      iban: "TR12 0006 7010 0000 0000 0000 00",
-      note: "Use release slug as transfer reference.",
-    };
-  }
-
-  return {
-    beneficiary: "Artist Wallet",
-    iban: "Ask artist for IBAN",
-    note: "Artist-specific payment details are provided after checkout.",
-  };
 };
 
 export default function ReleasePage() {
@@ -78,6 +62,26 @@ export default function ReleasePage() {
     },
   });
 
+  const artistPayment = release?.artistPayment ?? {
+    iban: "",
+    ibanName: "",
+    wallet: "",
+    network: "",
+  };
+  const hasIban = Boolean(artistPayment.iban?.trim());
+  const hasWallet = Boolean(artistPayment.wallet?.trim());
+
+  useEffect(() => {
+    if (!release) return;
+    if (!hasIban && hasWallet && paymentMethod === "MANUAL") {
+      setPaymentMethod("CRYPTO");
+      return;
+    }
+    if (!hasWallet && hasIban && paymentMethod === "CRYPTO") {
+      setPaymentMethod("MANUAL");
+    }
+  }, [release, hasIban, hasWallet, paymentMethod]);
+
   if (isLoading) {
     return (
       <div className="max-w-[1400px] mx-auto px-4 py-20 text-center">
@@ -106,7 +110,6 @@ export default function ReleasePage() {
     release.totalLikes ?? releaseTracks.reduce((sum, track) => sum + track.likes, 0);
   const platformFee = release.price * PLATFORM_FEE_RATE;
   const artistNet = release.price - platformFee;
-  const artistPaymentInfo = getArtistPaymentInfo(release.artistSlug);
 
   const handlePlayAll = () => {
     if (releaseTracks.length === 0) return;
@@ -148,6 +151,16 @@ export default function ReleasePage() {
       return;
     }
 
+    if (paymentMethod === "MANUAL" && !hasIban) {
+      alert("Artist has not configured IBAN details yet.");
+      return;
+    }
+
+    if (paymentMethod === "CRYPTO" && !hasWallet) {
+      alert("Artist has not configured crypto wallet details yet.");
+      return;
+    }
+
     if (paymentMethod === "CRYPTO" && !walletAddress) {
       void connectWallet();
       return;
@@ -186,11 +199,12 @@ export default function ReleasePage() {
               <button
                 type="button"
                 onClick={() => setPaymentMethod("MANUAL")}
+                disabled={!hasIban}
                 className={`px-3 py-2 font-mono-data transition-colors ${
                   paymentMethod === "MANUAL"
                     ? "bg-foreground text-background"
                     : "razor-border text-muted-foreground hover:text-foreground"
-                }`}
+                } ${!hasIban ? "opacity-40 cursor-not-allowed" : ""}`}
               >
                 <Landmark className="inline w-3 h-3 mr-1" />
                 IBAN
@@ -198,11 +212,12 @@ export default function ReleasePage() {
               <button
                 type="button"
                 onClick={() => setPaymentMethod("CRYPTO")}
+                disabled={!hasWallet}
                 className={`px-3 py-2 font-mono-data transition-colors ${
                   paymentMethod === "CRYPTO"
                     ? "bg-foreground text-background"
                     : "razor-border text-muted-foreground hover:text-foreground"
-                }`}
+                } ${!hasWallet ? "opacity-40 cursor-not-allowed" : ""}`}
               >
                 <Wallet className="inline w-3 h-3 mr-1" />
                 CRYPTO
@@ -213,12 +228,19 @@ export default function ReleasePage() {
               <div className="space-y-2 text-xs bg-secondary/60 p-3 razor-border">
                 <p className="text-muted-foreground">
                   Beneficiary:{" "}
-                  <span className="text-foreground">{artistPaymentInfo.beneficiary}</span>
+                  <span className="text-foreground">
+                    {artistPayment.ibanName || release.artistName}
+                  </span>
                 </p>
                 <p className="text-muted-foreground break-all">
-                  IBAN: <span className="text-foreground">{artistPaymentInfo.iban}</span>
+                  IBAN:{" "}
+                  <span className="text-foreground">
+                    {artistPayment.iban || "Artist has not set IBAN yet."}
+                  </span>
                 </p>
-                <p className="text-muted-foreground">{artistPaymentInfo.note}</p>
+                <p className="text-muted-foreground">
+                  Use release slug as transfer reference.
+                </p>
                 <label className="block text-muted-foreground font-mono-data">
                   Transfer Reference
                 </label>
@@ -233,6 +255,18 @@ export default function ReleasePage() {
               <div className="space-y-2 text-xs bg-secondary/60 p-3 razor-border">
                 <p className="text-muted-foreground">
                   Connect wallet to continue with crypto payment.
+                </p>
+                <p className="text-muted-foreground break-all">
+                  Artist wallet:{" "}
+                  <span className="text-foreground">
+                    {artistPayment.wallet || "Not configured"}
+                  </span>
+                </p>
+                <p className="text-muted-foreground">
+                  Network:{" "}
+                  <span className="text-foreground">
+                    {artistPayment.network || "EVM compatible"}
+                  </span>
                 </p>
                 {walletAddress ? (
                   <p className="text-foreground break-all">{walletAddress}</p>
