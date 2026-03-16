@@ -6,6 +6,8 @@ const REMOTE_UPLOAD_TOKEN = process.env.REMOTE_MEDIA_TOKEN?.trim() ?? "";
 const REMOTE_PUBLIC_BASE_URL = (
   process.env.REMOTE_MEDIA_PUBLIC_BASE_URL ?? "https://wearetheartmakers.com/music"
 ).replace(/\/$/, "");
+const REMOTE_STRICT =
+  String(process.env.REMOTE_MEDIA_STRICT ?? "true").toLowerCase() === "true";
 
 const sanitizeSegment = (value, fallback = "item") => {
   const normalized = String(value ?? "")
@@ -36,6 +38,8 @@ const toAbsoluteRemoteUrl = (rawUrl) => {
 
 export const isRemoteUploadEnabled = () =>
   Boolean(REMOTE_UPLOAD_URL && REMOTE_UPLOAD_TOKEN);
+
+export const isRemoteUploadStrict = () => REMOTE_STRICT;
 
 export const uploadFileToRemote = async ({
   localFilePath,

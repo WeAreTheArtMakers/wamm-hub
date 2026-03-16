@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
+import { authOptional, requireAuth } from "../lib/auth.js";
 import {
   serializeArtist,
   serializeRelease,
@@ -28,6 +29,7 @@ const releaseInclude = {
     },
   },
   genres: { include: { genre: true } },
+  _count: { select: { likes: true } },
   tracks: { include: trackInclude, orderBy: { createdAt: "asc" } },
 };
 
@@ -50,6 +52,8 @@ const asyncHandler =
       next(error);
     }
   };
+
+router.use(authOptional);
 
 router.get(
   "/home",
@@ -140,7 +144,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const release = await prisma.release.findUnique({
       where: { slug: req.params.slug },
-      include: releaseInclude,
+      include: {
+        ...releaseInclude,
+        likes: req.user
+          ? {
+              where: { userId: req.user.id },
+              select: { userId: true },
+              take: 1,
+            }
+          : false,
+      },
     });
 
     if (!release || !release.published || release.status !== "PUBLISHED") {
@@ -148,7 +161,95 @@ router.get(
       return;
     }
 
-    res.json(serializeRelease(release));
+    const serialized = serializeRelease(release);
+    res.json({
+      ...serialized,
+      likedByMe: Array.isArray(release.likes) ? release.likes.length > 0 : false,
+    });
+  }),
+);
+
+router.get(
+  "/releases/:releaseId/like",
+  asyncHandler(async (req, res) => {
+    const release = await prisma.release.findUnique({
+      where: { id: req.params.releaseId },
+      select: {
+        id: true,
+        published: true,
+        status: true,
+        _count: { select: { likes: true } },
+        likes: req.user
+          ? {
+              where: { userId: req.user.id },
+              select: { userId: true },
+              take: 1,
+            }
+          : false,
+      },
+    });
+
+    if (!release || !release.published || release.status !== "PUBLISHED") {
+      res.status(404).json({ message: "Release not found." });
+      return;
+    }
+
+    res.json({
+      likedByMe: Array.isArray(release.likes) ? release.likes.length > 0 : false,
+      totalLikes: release._count.likes,
+    });
+  }),
+);
+
+router.post(
+  "/releases/:releaseId/like",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const release = await prisma.release.findUnique({
+      where: { id: req.params.releaseId },
+      select: { id: true, published: true, status: true },
+    });
+
+    if (!release || !release.published || release.status !== "PUBLISHED") {
+      res.status(404).json({ message: "Release not found." });
+      return;
+    }
+
+    const existing = await prisma.releaseLike.findUnique({
+      where: {
+        releaseId_userId: {
+          releaseId: release.id,
+          userId: req.user.id,
+        },
+      },
+    });
+
+    if (existing) {
+      await prisma.releaseLike.delete({
+        where: {
+          releaseId_userId: {
+            releaseId: release.id,
+            userId: req.user.id,
+          },
+        },
+      });
+    } else {
+      await prisma.releaseLike.create({
+        data: {
+          releaseId: release.id,
+          userId: req.user.id,
+        },
+      });
+    }
+
+    const count = await prisma.releaseLike.count({
+      where: { releaseId: release.id },
+    });
+
+    res.json({
+      likedByMe: !existing,
+      totalLikes: count,
+    });
   }),
 );
 

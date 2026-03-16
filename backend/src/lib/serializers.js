@@ -55,6 +55,8 @@ export const serializeRelease = (release) => {
   const tracks = (release.tracks ?? []).map(serializeTrack);
   const totalPlays = tracks.reduce((sum, track) => sum + track.plays, 0);
   const totalLikes = tracks.reduce((sum, track) => sum + track.likes, 0);
+  const communityLikes =
+    typeof release._count?.likes === "number" ? release._count.likes : 0;
 
   return {
     id: release.id,
@@ -82,6 +84,7 @@ export const serializeRelease = (release) => {
     trackCount: tracks.length,
     totalPlays,
     totalLikes,
+    communityLikes,
     genres: (release.genres ?? []).map((entry) => entry.genre.name),
     releaseDate: formatDate(release.releaseDate),
     published: release.published,
@@ -137,5 +140,9 @@ export const serializeOrder = (order) => ({
   artistPayout: Number(order.artistPayout),
   paymentMethod: order.paymentMethod,
   cryptoTxHash: order.cryptoTxHash ?? undefined,
+  paymentNote: order.paymentNote ?? undefined,
+  buyerWallet: order.buyerWallet ?? undefined,
+  artistWallet: order.artistWallet ?? undefined,
+  platformWallet: order.platformWallet ?? undefined,
   createdAt: formatDate(order.createdAt),
 });

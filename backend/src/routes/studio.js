@@ -18,7 +18,11 @@ import {
   serializeRelease,
   serializeTrack,
 } from "../lib/serializers.js";
-import { uploadFileToRemote } from "../lib/remote-storage.js";
+import {
+  isRemoteUploadEnabled,
+  isRemoteUploadStrict,
+  uploadFileToRemote,
+} from "../lib/remote-storage.js";
 import { humanizeSlug, slugify } from "../lib/text.js";
 
 const router = Router();
@@ -221,7 +225,38 @@ const resolveCommentProfiles = async () => {
       email: true,
     },
   });
-  const idByEmail = new Map(existingUsers.map((user) => [user.email, user.id]));
+  const existingEmailSet = new Set(existingUsers.map((user) => user.email));
+
+  const missingProfiles = COMMENTER_PROFILES.filter(
+    (profile) => !existingEmailSet.has(profile.email),
+  );
+
+  if (missingProfiles.length > 0) {
+    await prisma.user.createMany({
+      data: missingProfiles.map((profile) => ({
+        email: profile.email,
+        passwordHash: crypto
+          .createHash("sha256")
+          .update(`commenter:${profile.email}`)
+          .digest("hex"),
+        role: "LISTENER",
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  const allUsers = await prisma.user.findMany({
+    where: {
+      email: {
+        in: COMMENTER_PROFILES.map((profile) => profile.email),
+      },
+    },
+    select: {
+      id: true,
+      email: true,
+    },
+  });
+  const idByEmail = new Map(allUsers.map((user) => [user.email, user.id]));
 
   return COMMENTER_PROFILES.map((profile) => ({
     ...profile,
@@ -285,6 +320,15 @@ const uploadToRemoteWithFallback = async ({
   fileName,
   mimeType,
 }) => {
+  if (!isRemoteUploadEnabled()) {
+    if (isRemoteUploadStrict()) {
+      throw new Error(
+        "Remote media upload is required but REMOTE_MEDIA_UPLOAD_URL / REMOTE_MEDIA_TOKEN is not configured.",
+      );
+    }
+    return localUrl;
+  }
+
   try {
     const remoteUrl = await uploadFileToRemote({
       localFilePath,
@@ -297,8 +341,35 @@ const uploadToRemoteWithFallback = async ({
     });
     return remoteUrl || localUrl;
   } catch (error) {
+    if (isRemoteUploadStrict()) {
+      throw new Error(
+        `Remote upload failed for ${kind} (${fileName}): ${error.message}`,
+      );
+    }
     console.warn("Remote upload skipped, using local media:", error.message);
     return localUrl;
+  }
+};
+
+const logArtistActivity = async ({
+  artistId,
+  actorUserId,
+  entityType,
+  action,
+  details,
+}) => {
+  try {
+    await prisma.artistActivityLog.create({
+      data: {
+        artistId,
+        actorUserId: actorUserId ?? null,
+        entityType,
+        action,
+        detailsJson: JSON.stringify(details ?? {}),
+      },
+    });
+  } catch (error) {
+    console.warn("Artist activity log failed:", error.message);
   }
 };
 
@@ -346,7 +417,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const artistId = req.artist.id;
 
-    const [artist, releases, tracks, orders] = await Promise.all([
+    const [artist, releases, tracks, orders, activityLogs] = await Promise.all([
       prisma.artist.findUnique({
         where: { id: artistId },
         include: {
@@ -380,6 +451,11 @@ router.get(
         orderBy: { createdAt: "desc" },
         take: 20,
       }),
+      prisma.artistActivityLog.findMany({
+        where: { artistId },
+        orderBy: { createdAt: "desc" },
+        take: 80,
+      }),
     ]);
 
     if (!artist) {
@@ -392,6 +468,19 @@ router.get(
       releases: releases.map(serializeRelease),
       tracks: tracks.map(serializeTrack),
       recentOrders: orders,
+      activityLogs: activityLogs.map((entry) => ({
+        id: entry.id,
+        entityType: entry.entityType,
+        action: entry.action,
+        details: (() => {
+          try {
+            return JSON.parse(entry.detailsJson || "{}");
+          } catch {
+            return {};
+          }
+        })(),
+        createdAt: entry.createdAt.toISOString(),
+      })),
     });
   }),
 );
@@ -510,6 +599,16 @@ router.patch(
       include: {
         genres: { include: { genre: true } },
         _count: { select: { tracks: true } },
+      },
+    });
+
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "ARTIST",
+      action: "PROFILE_UPDATED",
+      details: {
+        fields: Object.keys(updateData),
       },
     });
 
@@ -748,6 +847,18 @@ router.post(
       include: studioReleaseInclude,
     });
 
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "RELEASE",
+      action: "RELEASE_CREATED",
+      details: {
+        releaseId,
+        releaseTitle: title,
+        trackCount: createdTrackIds.length,
+      },
+    });
+
     res.status(201).json({
       message: "Release uploaded successfully.",
       release: serializeRelease(createdRelease),
@@ -843,6 +954,17 @@ router.patch(
     await prisma.release.update({
       where: { id: release.id },
       data: updateData,
+    });
+
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "RELEASE",
+      action: "RELEASE_UPDATED",
+      details: {
+        releaseId: release.id,
+        changedFields: Object.keys(updateData),
+      },
     });
 
     const updatedRelease = await prisma.release.findUnique({
@@ -972,6 +1094,17 @@ router.patch(
       data: updateData,
     });
 
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "TRACK",
+      action: "TRACK_UPDATED",
+      details: {
+        trackId: track.id,
+        changedFields: Object.keys(updateData),
+      },
+    });
+
     const updatedTrack = await prisma.track.findUnique({
       where: { id: track.id },
       include: {
@@ -1016,6 +1149,17 @@ router.post(
         releaseDate: release.releaseDate ?? new Date(),
       },
       include: studioReleaseInclude,
+    });
+
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "RELEASE",
+      action: "RELEASE_PUBLISHED",
+      details: {
+        releaseId: release.id,
+        title: updated.title,
+      },
     });
 
     res.json({

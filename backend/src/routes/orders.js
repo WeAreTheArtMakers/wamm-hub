@@ -6,6 +6,11 @@ import { serializeOrder } from "../lib/serializers.js";
 
 const router = Router();
 const PLATFORM_FEE_RATE = 0.03;
+const PLATFORM_WALLET_ADDRESS =
+  process.env.PLATFORM_WALLET_ADDRESS?.trim() ||
+  "0xc66aC8bcF729a6398bc879B7454B13983220601e";
+const txHashRegex = /^0x[a-fA-F0-9]{64}$/;
+
 const purchaseSchema = z.object({
   paymentMethod: z.enum(["STRIPE", "CRYPTO", "MANUAL"]).default("MANUAL"),
   walletAddress: z.string().trim().min(6).optional(),
@@ -33,7 +38,16 @@ router.post(
     const release = await prisma.release.findUnique({
       where: { id: req.params.releaseId },
       include: {
-        artist: { select: { name: true } },
+        artist: {
+          select: {
+            id: true,
+            name: true,
+            payoutWallet: true,
+            payoutNetwork: true,
+            payoutIban: true,
+            payoutIbanName: true,
+          },
+        },
       },
     });
 
@@ -49,19 +63,53 @@ router.post(
 
     const platformFee = Number((release.price * PLATFORM_FEE_RATE).toFixed(2));
     const artistPayout = Number((release.price - platformFee).toFixed(2));
-    const paymentReference =
-      paymentMethod === "CRYPTO"
-        ? payload.txHash ?? (payload.walletAddress ? `wallet:${payload.walletAddress}` : null)
-        : payload.ibanReference
-          ? `iban:${payload.ibanReference}`
-          : null;
+    if (paymentMethod === "CRYPTO" && !release.artist.payoutWallet) {
+      res.status(400).json({
+        message: "Artist crypto wallet is not configured yet.",
+      });
+      return;
+    }
 
-    if (paymentMethod === "CRYPTO" && !paymentReference) {
+    if (paymentMethod === "CRYPTO" && !payload.walletAddress) {
       res.status(400).json({
         message: "Wallet connection is required for crypto purchases.",
       });
       return;
     }
+
+    if (
+      paymentMethod === "CRYPTO" &&
+      (!payload.txHash || !txHashRegex.test(payload.txHash))
+    ) {
+      res.status(400).json({
+        message:
+          "Valid blockchain transaction hash is required for crypto purchase confirmation.",
+      });
+      return;
+    }
+
+    if (paymentMethod === "MANUAL" && !release.artist.payoutIban) {
+      res.status(400).json({
+        message: "Artist has not configured IBAN details yet.",
+      });
+      return;
+    }
+
+    if (paymentMethod === "MANUAL" && !payload.ibanReference) {
+      res.status(400).json({
+        message:
+          "Bank transfer reference is required. Your order will be confirmed after admin approval.",
+      });
+      return;
+    }
+
+    const status = paymentMethod === "CRYPTO" ? "PAID" : "UNDER_REVIEW";
+    const paymentReference =
+      paymentMethod === "CRYPTO"
+        ? payload.txHash
+        : payload.ibanReference
+          ? `iban:${payload.ibanReference}`
+          : undefined;
 
     const order = await prisma.order.create({
       data: {
@@ -71,20 +119,50 @@ router.post(
         trackId: null,
         releaseTitle: release.title,
         artistName: release.artist.name,
-        status: "PAID",
+        status,
         totalAmount: release.price,
         platformFee,
         artistPayout,
         paymentMethod,
-        cryptoTxHash: paymentReference ?? undefined,
+        cryptoTxHash: paymentMethod === "CRYPTO" ? paymentReference : undefined,
+        paymentNote:
+          paymentMethod === "CRYPTO"
+            ? `Crypto payment confirmed on ${release.artist.payoutNetwork || "EVM"} network.`
+            : `IBAN transfer reference: ${payload.ibanReference}`,
+        buyerWallet: paymentMethod === "CRYPTO" ? payload.walletAddress : undefined,
+        artistWallet: release.artist.payoutWallet ?? undefined,
+        platformWallet: PLATFORM_WALLET_ADDRESS,
         createdAt: new Date(),
       },
     });
 
+    if (release.artist?.id) {
+      await prisma.artistActivityLog.create({
+        data: {
+          artistId: release.artist.id,
+          actorUserId: req.user.id,
+          entityType: "ORDER",
+          action:
+            paymentMethod === "CRYPTO"
+              ? "CRYPTO_ORDER_PAID"
+              : "MANUAL_ORDER_CREATED",
+          detailsJson: JSON.stringify({
+            orderId: order.id,
+            releaseId: release.id,
+            totalAmount: release.price,
+            platformFee,
+            artistPayout,
+          }),
+        },
+      });
+    }
+
     res.status(201).json({
       order: serializeOrder(order),
       message:
-        "Order created. Payment marked as completed in demo mode for immediate download access.",
+        paymentMethod === "CRYPTO"
+          ? "Crypto payment confirmed. Download access is now active."
+          : "IBAN order received. Admin approval is required before download access.",
     });
   }),
 );

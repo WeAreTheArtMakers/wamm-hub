@@ -9,6 +9,11 @@ import {
   ArrowLeft,
   Wallet,
   Landmark,
+  Copy,
+  Check,
+  Facebook,
+  Linkedin,
+  X,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { TrackList } from "@/components/music/TrackList";
@@ -29,10 +34,17 @@ type EthereumProvider = {
 export default function ReleasePage() {
   const { slug } = useParams<{ slug: string }>();
   const setTrack = usePlayer((state) => state.setTrack);
+  const sessionUser = getSessionUser();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MANUAL");
   const [walletAddress, setWalletAddress] = useState("");
+  const [txHash, setTxHash] = useState("");
   const [ibanReference, setIbanReference] = useState("");
   const [waveTrackId, setWaveTrackId] = useState<string | null>(null);
+  const [likedByMe, setLikedByMe] = useState(false);
+  const [releaseLikeCount, setReleaseLikeCount] = useState(0);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [copyOk, setCopyOk] = useState(false);
+  const [purchaseStatus, setPurchaseStatus] = useState<string>("");
   const [downloadItems, setDownloadItems] = useState<
     Array<{ trackId: string; title: string; url: string; format: string }>
   >([]);
@@ -42,6 +54,24 @@ export default function ReleasePage() {
     queryFn: () => api.getReleaseBySlug(slug ?? ""),
     enabled: Boolean(slug),
   });
+
+  const likeStateQuery = useQuery({
+    queryKey: ["release-like", release?.id],
+    queryFn: () => api.getReleaseLikeState(release?.id ?? ""),
+    enabled: Boolean(release?.id),
+  });
+
+  useEffect(() => {
+    if (!release) return;
+    setReleaseLikeCount(release.communityLikes ?? 0);
+    setLikedByMe(Boolean(release.likedByMe));
+  }, [release]);
+
+  useEffect(() => {
+    if (!likeStateQuery.data) return;
+    setLikedByMe(likeStateQuery.data.likedByMe);
+    setReleaseLikeCount(likeStateQuery.data.totalLikes);
+  }, [likeStateQuery.data]);
 
   const purchaseMutation = useMutation({
     mutationFn: async (payload: {
@@ -53,13 +83,38 @@ export default function ReleasePage() {
       const purchase = await api.purchaseRelease(payload.releaseId, {
         paymentMethod: payload.paymentMethod,
         walletAddress: payload.walletAddress,
+        txHash: payload.paymentMethod === "CRYPTO" ? txHash.trim() : undefined,
         ibanReference: payload.ibanReference,
       });
-      const downloads = await api.getOrderDownloads(purchase.order.id);
-      return downloads.downloads;
+      if (
+        purchase.order.status === "PAID" ||
+        purchase.order.status === "FULFILLED"
+      ) {
+        const downloads = await api.getOrderDownloads(purchase.order.id);
+        return {
+          downloads: downloads.downloads,
+          message: purchase.message,
+          status: purchase.order.status,
+        };
+      }
+
+      return {
+        downloads: [],
+        message: purchase.message,
+        status: purchase.order.status,
+      };
     },
-    onSuccess: (downloads) => {
+    onSuccess: ({ downloads, message, status }) => {
       setDownloadItems(downloads);
+      setPurchaseStatus(`${status}: ${message}`);
+    },
+  });
+
+  const likeMutation = useMutation({
+    mutationFn: async () => api.toggleReleaseLike(release.id),
+    onSuccess: (result) => {
+      setLikedByMe(result.likedByMe);
+      setReleaseLikeCount(result.totalLikes);
     },
   });
 
@@ -154,8 +209,7 @@ export default function ReleasePage() {
   };
 
   const handleBuy = () => {
-    const user = getSessionUser();
-    if (!user) {
+    if (!sessionUser) {
       window.location.href = "/login";
       return;
     }
@@ -175,12 +229,56 @@ export default function ReleasePage() {
       return;
     }
 
+    if (paymentMethod === "CRYPTO" && txHash.trim().length < 10) {
+      alert("Paste the blockchain transaction hash to unlock instant download.");
+      return;
+    }
+
     purchaseMutation.mutate({
       releaseId: release.id,
       paymentMethod,
       walletAddress: paymentMethod === "CRYPTO" ? walletAddress : undefined,
       ibanReference: paymentMethod === "MANUAL" ? ibanReference.trim() : undefined,
     });
+  };
+
+  const releaseUrl =
+    typeof window !== "undefined"
+      ? window.location.href
+      : `https://wamm-hub.up.railway.app/release/${release.slug}`;
+
+  const handleShare = (type: "x" | "facebook" | "linkedin" | "copy") => {
+    const encodedUrl = encodeURIComponent(releaseUrl);
+    const text = encodeURIComponent(`${release.title} — ${release.artistName} | WAMM HUB`);
+
+    if (type === "copy") {
+      navigator.clipboard
+        .writeText(releaseUrl)
+        .then(() => {
+          setCopyOk(true);
+          setTimeout(() => setCopyOk(false), 1600);
+        })
+        .catch(() => {
+          setCopyOk(false);
+        });
+      return;
+    }
+
+    const target =
+      type === "x"
+        ? `https://x.com/intent/tweet?url=${encodedUrl}&text=${text}`
+        : type === "facebook"
+          ? `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`
+          : `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`;
+    window.open(target, "_blank", "noopener,noreferrer");
+  };
+
+  const handleLike = () => {
+    if (!sessionUser) {
+      window.location.href = "/login";
+      return;
+    }
+    likeMutation.mutate();
   };
 
   return (
@@ -250,6 +348,9 @@ export default function ReleasePage() {
                 <p className="text-muted-foreground">
                   Use release slug as transfer reference.
                 </p>
+                <p className="text-accent">
+                  IBAN orders require admin verification before download links are unlocked.
+                </p>
                 <label className="block text-muted-foreground font-mono-data">
                   Transfer Reference
                 </label>
@@ -277,6 +378,12 @@ export default function ReleasePage() {
                     {artistPayment.network || "EVM compatible"}
                   </span>
                 </p>
+                <p className="text-muted-foreground">
+                  Platform wallet (fee 3%):{" "}
+                  <span className="text-foreground break-all">
+                    0xc66aC8bcF729a6398bc879B7454B13983220601e
+                  </span>
+                </p>
                 {walletAddress ? (
                   <p className="text-foreground break-all">{walletAddress}</p>
                 ) : (
@@ -288,6 +395,18 @@ export default function ReleasePage() {
                     Connect Wallet
                   </button>
                 )}
+                <label className="block text-muted-foreground font-mono-data pt-1">
+                  Blockchain Tx Hash
+                </label>
+                <input
+                  value={txHash}
+                  onChange={(event) => setTxHash(event.target.value)}
+                  placeholder="0x..."
+                  className="w-full px-2 py-2 bg-background razor-border text-foreground"
+                />
+                <p className="text-accent">
+                  Crypto purchases unlock download links instantly after valid tx hash.
+                </p>
               </div>
             )}
 
@@ -323,6 +442,11 @@ export default function ReleasePage() {
                 {purchaseMutation.error.message}
               </p>
             )}
+            {purchaseStatus && (
+              <p className="text-xs text-muted-foreground razor-border px-2 py-2">
+                {purchaseStatus}
+              </p>
+            )}
             {downloadItems.length > 0 && (
               <div className="pt-2 space-y-1">
                 <p className="font-mono-data text-accent text-xs">Downloads ready</p>
@@ -339,13 +463,57 @@ export default function ReleasePage() {
                 ))}
               </div>
             )}
-            <div className="flex gap-2">
-              <button className="flex-1 py-2 razor-border font-mono-data text-muted-foreground hover:text-foreground transition-colors press-effect flex items-center justify-center gap-1">
-                <Heart className="w-3 h-3" /> Like
+            <div className="relative flex gap-2">
+              <button
+                type="button"
+                onClick={handleLike}
+                disabled={likeMutation.isPending}
+                className={`flex-1 py-2 razor-border font-mono-data transition-colors press-effect flex items-center justify-center gap-1 ${
+                  likedByMe ? "text-accent" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Heart className="w-3 h-3" /> Like ({releaseLikeCount})
               </button>
-              <button className="flex-1 py-2 razor-border font-mono-data text-muted-foreground hover:text-foreground transition-colors press-effect flex items-center justify-center gap-1">
+              <button
+                type="button"
+                onClick={() => setShareOpen((prev) => !prev)}
+                className="flex-1 py-2 razor-border font-mono-data text-muted-foreground hover:text-foreground transition-colors press-effect flex items-center justify-center gap-1"
+              >
                 <Share2 className="w-3 h-3" /> Share
               </button>
+              {shareOpen && (
+                <div className="absolute left-0 right-0 top-full mt-2 razor-border bg-background/95 p-2 z-20 grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => handleShare("x")}
+                    className="px-2 py-2 razor-border text-muted-foreground hover:text-foreground inline-flex items-center justify-center gap-1"
+                  >
+                    <X className="w-3 h-3" /> X
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleShare("facebook")}
+                    className="px-2 py-2 razor-border text-muted-foreground hover:text-foreground inline-flex items-center justify-center gap-1"
+                  >
+                    <Facebook className="w-3 h-3" /> Facebook
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleShare("linkedin")}
+                    className="px-2 py-2 razor-border text-muted-foreground hover:text-foreground inline-flex items-center justify-center gap-1"
+                  >
+                    <Linkedin className="w-3 h-3" /> LinkedIn
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleShare("copy")}
+                    className="px-2 py-2 razor-border text-muted-foreground hover:text-foreground inline-flex items-center justify-center gap-1"
+                  >
+                    {copyOk ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    {copyOk ? "Copied" : "Copy Link"}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

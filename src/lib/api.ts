@@ -150,10 +150,72 @@ export const api = {
       },
     ),
 
+  getReleaseLikeState: (releaseId: string) =>
+    request<{ likedByMe: boolean; totalLikes: number }>(
+      `/api/releases/${encodeURIComponent(releaseId)}/like`,
+    ),
+
+  toggleReleaseLike: (releaseId: string) =>
+    request<{ likedByMe: boolean; totalLikes: number }>(
+      `/api/releases/${encodeURIComponent(releaseId)}/like`,
+      { method: "POST" },
+    ),
+
   getMyOrders: () => request<Order[]>("/api/orders/my"),
 
   getOrderDownloads: (orderId: string) =>
     request<OrderDownloadsResponse>(`/api/orders/${encodeURIComponent(orderId)}/downloads`),
+
+  adminLogin: (payload: { username: string; password: string }) =>
+    request<{ token: string; admin: { username: string } }>(
+      "/api/__wamm_ctrl_9f4ad8/login",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  getAdminManualOrders: (adminToken: string) =>
+    request<{
+      total: number;
+      pending: Array<{
+        order: Order;
+        buyerEmail: string;
+        releaseSlug: string;
+        releaseId: string;
+        artistId: string;
+        artistWallet: string;
+        artistIban: string;
+        artistIbanName: string;
+        paymentNote: string;
+      }>;
+    }>("/api/__wamm_ctrl_9f4ad8/orders/manual", {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    }),
+
+  approveAdminManualOrder: (adminToken: string, orderId: string) =>
+    request<{ message: string }>(
+      `/api/__wamm_ctrl_9f4ad8/orders/${encodeURIComponent(orderId)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    ),
+
+  rejectAdminManualOrder: (adminToken: string, orderId: string) =>
+    request<{ message: string }>(
+      `/api/__wamm_ctrl_9f4ad8/orders/${encodeURIComponent(orderId)}/reject`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    ),
 
   getStudioDashboard: () => request<StudioDashboardResponse>("/api/studio/dashboard"),
 

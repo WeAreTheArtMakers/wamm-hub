@@ -8,6 +8,7 @@ import { authRouter } from "./routes/auth.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { orderRouter } from "./routes/orders.js";
 import { studioRouter } from "./routes/studio.js";
+import { adminRouter } from "./routes/admin.js";
 
 const app = express();
 const rootDir = process.cwd();
@@ -152,6 +153,7 @@ app.use("/api/auth", authRouter);
 app.use("/api", catalogRouter);
 app.use("/api/orders", orderRouter);
 app.use("/api/studio", studioRouter);
+app.use("/api/__wamm_ctrl_9f4ad8", adminRouter);
 
 if (hasFrontendBuild) {
   app.get("/release/:slug", async (req, res, next) => {

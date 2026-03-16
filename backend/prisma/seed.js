@@ -115,6 +115,8 @@ const createCommentText = (rng) => {
 };
 
 async function clearDatabase() {
+  await prisma.releaseLike.deleteMany();
+  await prisma.artistActivityLog.deleteMany();
   await prisma.trackComment.deleteMany();
   await prisma.order.deleteMany();
   await prisma.tourDate.deleteMany();

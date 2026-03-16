@@ -45,6 +45,8 @@ model User {
   role         UserRole       @default(LISTENER)
   ownedArtist  Artist?        @relation("ArtistOwner")
   comments     TrackComment[]
+  releaseLikes ReleaseLike[]
+  activityLogs ArtistActivityLog[]
   orders       Order[]
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
@@ -68,6 +70,7 @@ model Artist {
   payoutNetwork    String?
   ownerUser        User?        @relation("ArtistOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   genres           ArtistGenre[]
+  activityLogs     ArtistActivityLog[]
   releases         Release[]
   tracks           Track[]
   tourDates        TourDate[]
@@ -112,6 +115,7 @@ model Release {
   genres      ReleaseGenre[]
   tracks      Track[]
   orders      Order[]
+  likes       ReleaseLike[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -202,6 +206,10 @@ model Order {
   artistPayout Float
   paymentMethod PaymentMethod
   cryptoTxHash String?
+  paymentNote  String?
+  buyerWallet  String?
+  artistWallet String?
+  platformWallet String?
   createdAt    DateTime
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   release      Release?      @relation(fields: [releaseId], references: [id], onDelete: Cascade)
@@ -210,4 +218,30 @@ model Order {
   @@index([userId])
   @@index([releaseId])
   @@index([trackId])
+}
+
+model ReleaseLike {
+  releaseId String
+  userId    String
+  createdAt DateTime @default(now())
+  release   Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([releaseId, userId])
+  @@index([userId])
+}
+
+model ArtistActivityLog {
+  id          String   @id @default(cuid())
+  artistId    String
+  actorUserId String?
+  entityType  String
+  action      String
+  detailsJson String
+  createdAt   DateTime @default(now())
+  artist      Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  actorUser   User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, createdAt])
+  @@index([actorUserId])
 }

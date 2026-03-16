@@ -83,6 +83,8 @@ export interface Release {
   trackCount: number;
   totalPlays: number;
   totalLikes: number;
+  communityLikes: number;
+  likedByMe?: boolean;
   genres: string[];
   releaseDate: string;
   published: boolean;
@@ -160,6 +162,10 @@ export interface Order {
   artistPayout: number;
   paymentMethod: "STRIPE" | "CRYPTO" | "MANUAL";
   cryptoTxHash?: string;
+  paymentNote?: string;
+  buyerWallet?: string;
+  artistWallet?: string;
+  platformWallet?: string;
   createdAt: string;
 }
 
@@ -190,6 +196,13 @@ export interface StudioDashboardResponse {
   releases: Release[];
   tracks: Track[];
   recentOrders: Order[];
+  activityLogs: Array<{
+    id: string;
+    entityType: string;
+    action: string;
+    details: Record<string, unknown>;
+    createdAt: string;
+  }>;
 }
 
 export interface StudioReleaseUploadResponse {

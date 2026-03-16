@@ -252,6 +252,7 @@ export default function StudioPage() {
   const artist = studioQuery.data?.artist;
   const releases = studioQuery.data?.releases ?? [];
   const artistTracks = studioQuery.data?.tracks ?? [];
+  const activityLogs = studioQuery.data?.activityLogs ?? [];
 
   return (
     <motion.div
@@ -733,6 +734,28 @@ export default function StudioPage() {
             {updateTrackMutation.isError && (
               <p className="text-sm text-destructive">{updateTrackMutation.error.message}</p>
             )}
+          </section>
+
+          <section className="space-y-4">
+            <h2 className="font-display text-xl">Artist Activity Log</h2>
+            <div className="razor-border divide-y divide-border">
+              {activityLogs.length === 0 && (
+                <div className="p-4 text-muted-foreground font-mono-data">
+                  No activity records yet.
+                </div>
+              )}
+              {activityLogs.slice(0, 80).map((entry) => (
+                <div key={entry.id} className="p-4 space-y-1">
+                  <div className="flex flex-wrap justify-between items-center gap-2">
+                    <span className="font-mono-data text-accent">{entry.action}</span>
+                    <span className="font-mono-data text-muted-foreground">
+                      {new Date(entry.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{entry.entityType}</p>
+                </div>
+              ))}
+            </div>
           </section>
         </div>
       )}

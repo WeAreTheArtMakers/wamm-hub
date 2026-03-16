@@ -16,6 +16,7 @@ import LoginPage from "./pages/LoginPage.tsx";
 import RegisterPage from "./pages/RegisterPage.tsx";
 import StudioPage from "./pages/StudioPage.tsx";
 import AuthSuccessPage from "./pages/AuthSuccessPage.tsx";
+import AdminGatePage from "./pages/AdminGatePage.tsx";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,7 @@ const App = () => (
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/auth/success" element={<AuthSuccessPage />} />
             <Route path="/studio" element={<StudioPage />} />
+            <Route path="/__wamm-console-9f4ad8" element={<AdminGatePage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AppLayout>
