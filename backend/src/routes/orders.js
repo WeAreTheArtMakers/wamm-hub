@@ -4,6 +4,7 @@ import { requireAuth } from "../lib/auth.js";
 import { serializeOrder } from "../lib/serializers.js";
 
 const router = Router();
+const PLATFORM_FEE_RATE = 0.03;
 
 const asyncHandler =
   (handler) =>
@@ -41,7 +42,7 @@ router.post(
       return;
     }
 
-    const platformFee = Number((release.price * 0.1).toFixed(2));
+    const platformFee = Number((release.price * PLATFORM_FEE_RATE).toFixed(2));
     const artistPayout = Number((release.price - platformFee).toFixed(2));
 
     const order = await prisma.order.create({

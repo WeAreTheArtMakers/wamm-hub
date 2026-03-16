@@ -11,6 +11,8 @@ import { getSessionUser } from "@/lib/auth";
 import { formatDuration, formatNumber, trackToPlayerTrack } from "@/lib/music";
 import { usePlayer } from "@/store/usePlayer";
 
+const PLATFORM_FEE_RATE = 0.03;
+
 export default function ReleasePage() {
   const { slug } = useParams<{ slug: string }>();
   const setTrack = usePlayer((state) => state.setTrack);
@@ -61,7 +63,7 @@ export default function ReleasePage() {
     release.totalPlays ?? releaseTracks.reduce((sum, track) => sum + track.plays, 0);
   const totalLikes =
     release.totalLikes ?? releaseTracks.reduce((sum, track) => sum + track.likes, 0);
-  const platformFee = release.price * 0.1;
+  const platformFee = release.price * PLATFORM_FEE_RATE;
   const artistNet = release.price - platformFee;
 
   const handlePlayAll = () => {
@@ -115,7 +117,7 @@ export default function ReleasePage() {
                 <span>${release.price.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-muted-foreground">
-                <span>WAMM Fee (10%)</span>
+                <span>WAMM Fee (3%)</span>
                 <span>-${platformFee.toFixed(2)}</span>
               </div>
               <div className="h-px bg-border my-1" />

@@ -3,6 +3,9 @@ import { PrismaClient } from "@prisma/client";
 import { loadWammCatalog } from "../src/lib/content-import.js";
 
 const prisma = new PrismaClient();
+const DEFAULT_PASSWORD = "password123";
+const BARAN_PASSWORD = "p3nc3r3l3r";
+const PLATFORM_FEE_RATE = 0.03;
 
 const hashPassword = (input) =>
   crypto.createHash("sha256").update(input).digest("hex");
@@ -17,7 +20,7 @@ const listeners = [
 const artistAccounts = [
   {
     id: "u_artist_baran",
-    email: "baran.gulesen@wamm.local",
+    email: "barangulesen@gmail.com",
     slug: "baran-gulesen",
     name: "Baran Gulesen",
   },
@@ -42,13 +45,15 @@ async function seedUsers() {
       ...listeners.map((listener) => ({
         id: listener.id,
         email: listener.email,
-        passwordHash: hashPassword("password123"),
+        passwordHash: hashPassword(DEFAULT_PASSWORD),
         role: "LISTENER",
       })),
       ...artistAccounts.map((artist) => ({
         id: artist.id,
         email: artist.email,
-        passwordHash: hashPassword("password123"),
+        passwordHash: hashPassword(
+          artist.slug === "baran-gulesen" ? BARAN_PASSWORD : DEFAULT_PASSWORD,
+        ),
         role: "ARTIST",
       })),
     ],
@@ -204,8 +209,10 @@ async function seedCatalog() {
           "Artist",
         status: "PAID",
         totalAmount: firstRelease.price,
-        platformFee: Number((firstRelease.price * 0.1).toFixed(2)),
-        artistPayout: Number((firstRelease.price * 0.9).toFixed(2)),
+        platformFee: Number((firstRelease.price * PLATFORM_FEE_RATE).toFixed(2)),
+        artistPayout: Number(
+          (firstRelease.price * (1 - PLATFORM_FEE_RATE)).toFixed(2),
+        ),
         paymentMethod: "MANUAL",
         createdAt: now(),
       },

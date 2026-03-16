@@ -62,7 +62,7 @@ const Index = () => {
             <span className="text-accent">better.</span>
           </h1>
           <p className="text-muted-foreground text-base md:text-lg max-w-md mb-8 leading-relaxed">
-            Direct-to-fan releases. Transparent fees. Artists keep 90%. Discover,
+            Direct-to-fan releases. Transparent fees. Artists keep 97%. Discover,
             stream, buy, and support independent music.
           </p>
           <div className="flex items-center gap-3">
@@ -116,31 +116,33 @@ const Index = () => {
         </div>
       </section>
 
-      <section className="mb-16 py-12 border-t razor-border">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {[
-            {
-              label: "Artist Payout",
-              value: "90%",
-              desc: "Artists keep 90% of every sale. Transparent, always.",
-            },
-            {
-              label: "Platform Fee",
-              value: "10%",
-              desc: "Simple, flat fee. No hidden costs or surprise deductions.",
-            },
-            {
-              label: "Payment Options",
-              value: "FIAT + CRYPTO",
-              desc: "Accept card payments and crypto. USDT, USDC on multiple networks.",
-            },
-          ].map((item) => (
-            <div key={item.label} className="space-y-2">
-              <span className="font-mono-data text-muted-foreground">{item.label}</span>
-              <h3 className="font-display text-3xl text-accent">{item.value}</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
-            </div>
-          ))}
+      <section className="mb-16">
+        <div className="razor-border px-6 py-10 md:px-10">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10">
+            {[
+              {
+                label: "Artist Payout",
+                value: "97%",
+                desc: "Artists keep 97% of every sale. Transparent, always.",
+              },
+              {
+                label: "Platform Fee",
+                value: "3%",
+                desc: "Simple, flat fee. No hidden costs or surprise deductions.",
+              },
+              {
+                label: "Payment Options",
+                value: "FIAT + CRYPTO",
+                desc: "Accept card payments and crypto. USDT, USDC on multiple networks.",
+              },
+            ].map((item) => (
+              <div key={item.label} className="space-y-2">
+                <span className="font-mono-data text-muted-foreground">{item.label}</span>
+                <h3 className="font-display text-3xl text-accent">{item.value}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
     </div>

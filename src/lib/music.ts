@@ -7,7 +7,12 @@ export const trackToPlayerTrack = (track: Track): PlayerTrack => ({
   artistName: track.artistName,
   artistSlug: track.artistSlug,
   coverArtUrl: track.coverArtUrl,
-  audioUrl: track.previewUrl || track.audioUrl,
+  audioUrl:
+    track.originalUrl ||
+    track.highQualityUrl ||
+    track.audioUrl ||
+    track.previewUrl ||
+    "",
   duration: track.duration,
   bpm: track.bpm,
   waveform: track.waveform,

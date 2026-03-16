@@ -29,15 +29,37 @@ const seconds = (value) => {
   return Math.max(1, Math.round(n));
 };
 
+const isLfsPointerFile = async (filePath) => {
+  if (!(await fileExists(filePath))) return false;
+  try {
+    const handle = await fs.open(filePath, "r");
+    const buffer = Buffer.alloc(200);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    await handle.close();
+    const head = buffer.subarray(0, bytesRead).toString("utf8");
+    return head.startsWith("version https://git-lfs.github.com/spec/v1");
+  } catch {
+    return false;
+  }
+};
+
+const isUsableAudioFile = async (filePath) => {
+  if (!(await fileExists(filePath))) return false;
+  return !(await isLfsPointerFile(filePath));
+};
+
 const pickAudioSource = async (trackDirectory) => {
-  const candidates = ["preview.mp3", "high.mp3", "original.mp3", "master.wav"];
+  const candidates = ["original.mp3", "high.mp3", "master.wav", "preview.mp3"];
   for (const filename of candidates) {
     const filePath = path.join(trackDirectory, filename);
-    if (await fileExists(filePath)) return filePath;
+    if (await isUsableAudioFile(filePath)) return filePath;
   }
   const files = await listFiles(trackDirectory);
   const audio = files.find((name) => /\.(mp3|wav|flac|m4a)$/i.test(name));
-  return audio ? path.join(trackDirectory, audio) : null;
+  if (!audio) return null;
+  const fallbackPath = path.join(trackDirectory, audio);
+  if (!(await isUsableAudioFile(fallbackPath))) return null;
+  return fallbackPath;
 };
 
 const extractCoverFromAudio = async (audioPath, stableKey) => {
@@ -106,7 +128,17 @@ const parseTrackFromReleaseFolder = async ({
   const highPath = path.join(trackDirectory, "high.mp3");
   const originalPath = path.join(trackDirectory, "original.mp3");
   const masterPath = path.join(trackDirectory, "master.wav");
-  const sourceAudioPath = await pickAudioSource(trackDirectory);
+  const hasPreview = await isUsableAudioFile(previewPath);
+  const hasHigh = await isUsableAudioFile(highPath);
+  const hasOriginal = await isUsableAudioFile(originalPath);
+  const hasMaster = await isUsableAudioFile(masterPath);
+  const hasFullSource = hasOriginal || hasHigh || hasMaster;
+  if (!hasFullSource) return null;
+  const sourceAudioPath =
+    (hasOriginal && originalPath) ||
+    (hasHigh && highPath) ||
+    (hasMaster && masterPath) ||
+    (await pickAudioSource(trackDirectory));
   if (!sourceAudioPath) return null;
 
   const metadata = await readAudioMetadata(sourceAudioPath);
@@ -128,14 +160,12 @@ const parseTrackFromReleaseFolder = async ({
     artistName,
     releaseSlug,
     coverArtUrl: coverArtUrl ?? "",
-    audioUrl: (await fileExists(previewPath))
-      ? toMediaUrl(previewPath)
-      : toMediaUrl(sourceAudioPath),
-    previewUrl: (await fileExists(previewPath)) ? toMediaUrl(previewPath) : null,
-    highQualityUrl: (await fileExists(highPath)) ? toMediaUrl(highPath) : null,
-    originalUrl: (await fileExists(originalPath))
+    audioUrl: toMediaUrl(sourceAudioPath),
+    previewUrl: hasPreview ? toMediaUrl(previewPath) : null,
+    highQualityUrl: hasHigh ? toMediaUrl(highPath) : null,
+    originalUrl: hasOriginal
       ? toMediaUrl(originalPath)
-      : (await fileExists(masterPath))
+      : hasMaster
         ? toMediaUrl(masterPath)
         : null,
     duration: metadata.duration,
@@ -155,6 +185,7 @@ const parseSingleTrack = async ({
   index,
 }) => {
   const absoluteAudioPath = path.join(singlesDirectory, fileName);
+  if (!(await isUsableAudioFile(absoluteAudioPath))) return null;
   const baseName = path.basename(fileName, path.extname(fileName));
   const releaseSlug = slugify(baseName);
 
@@ -314,6 +345,7 @@ export const loadWammCatalog = async () => {
         fileName: singleFiles[i],
         index: i,
       });
+      if (!parsed) continue;
       if (createdReleaseSlugs.has(parsed.release.slug)) continue;
       releases.push(parsed.release);
       tracks.push(parsed.track);
@@ -322,7 +354,7 @@ export const loadWammCatalog = async () => {
       createdReleaseSlugs.add(parsed.release.slug);
     }
 
-      artists[artists.length - 1].genres = [
+    artists[artists.length - 1].genres = [
       ...new Set(artists[artists.length - 1].genres),
     ];
   }
