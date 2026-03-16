@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api";
@@ -8,8 +8,12 @@ import { setSession } from "@/lib/auth";
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const queryError = new URLSearchParams(location.search).get("error");
+  const apiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
+  const googleAuthUrl = `${apiBase}/api/auth/google/start?returnTo=${encodeURIComponent("/auth/success")}`;
 
   const loginMutation = useMutation({
     mutationFn: api.login,
@@ -39,6 +43,31 @@ export default function LoginPage() {
 
       <h1 className="font-display text-3xl mb-2">Sign In</h1>
       <p className="text-sm text-muted-foreground mb-8">Welcome back to WAMM.</p>
+
+      <a
+        href={googleAuthUrl}
+        className="w-full mb-4 py-3 razor-border font-mono-data text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center gap-2"
+      >
+        <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M21.8 12.23c0-.82-.07-1.4-.23-2H12v3.78h5.62c-.11.94-.72 2.35-2.06 3.3l-.02.13 2.99 2.27.21.02c1.94-1.74 3.06-4.3 3.06-7.92Z"
+          />
+          <path
+            fill="currentColor"
+            d="M12 22c2.75 0 5.05-.88 6.74-2.4l-3.21-2.42c-.86.58-2.02.98-3.53.98-2.69 0-4.98-1.74-5.8-4.14l-.13.01-3.11 2.36-.04.12A10.2 10.2 0 0 0 12 22Z"
+          />
+          <path
+            fill="currentColor"
+            d="M6.2 14.02a6.1 6.1 0 0 1-.34-2.02c0-.7.12-1.37.32-2.02l-.01-.13-3.16-2.4-.1.05A9.8 9.8 0 0 0 2 12c0 1.58.39 3.08 1.08 4.42l3.12-2.4Z"
+          />
+          <path
+            fill="currentColor"
+            d="M12 5.84c1.9 0 3.18.8 3.91 1.48l2.86-2.73C17.04 2.96 14.75 2 12 2a10.2 10.2 0 0 0-9.08 5.52l3.27 2.48c.84-2.4 3.12-4.16 5.81-4.16Z"
+          />
+        </svg>
+        Continue with Google
+      </a>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -78,6 +107,9 @@ export default function LoginPage() {
         <p className="text-sm text-destructive mt-4">
           {loginMutation.error.message}
         </p>
+      )}
+      {queryError && (
+        <p className="text-sm text-destructive mt-2">{queryError}</p>
       )}
 
       <p className="text-sm text-muted-foreground mt-6 text-center">

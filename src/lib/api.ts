@@ -128,11 +128,27 @@ export const api = {
 
   me: () => request<AuthMeResponse>("/api/auth/me"),
 
-  purchaseRelease: (releaseId: string, paymentMethod: "STRIPE" | "CRYPTO" | "MANUAL" = "MANUAL") =>
-    request<ReleasePurchaseResponse>(`/api/orders/release/${encodeURIComponent(releaseId)}`, {
-      method: "POST",
-      body: JSON.stringify({ paymentMethod }),
-    }),
+  purchaseRelease: (
+    releaseId: string,
+    payload: {
+      paymentMethod?: "STRIPE" | "CRYPTO" | "MANUAL";
+      walletAddress?: string;
+      txHash?: string;
+      ibanReference?: string;
+    } = {},
+  ) =>
+    request<ReleasePurchaseResponse>(
+      `/api/orders/release/${encodeURIComponent(releaseId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          paymentMethod: payload.paymentMethod ?? "MANUAL",
+          walletAddress: payload.walletAddress,
+          txHash: payload.txHash,
+          ibanReference: payload.ibanReference,
+        }),
+      },
+    ),
 
   getMyOrders: () => request<Order[]>("/api/orders/my"),
 

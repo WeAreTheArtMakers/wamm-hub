@@ -12,6 +12,8 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"listener" | "artist">("listener");
   const [artistName, setArtistName] = useState("");
+  const apiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
+  const googleAuthUrl = `${apiBase}/api/auth/google/start?returnTo=${encodeURIComponent("/auth/success")}`;
 
   const registerMutation = useMutation({
     mutationFn: api.register,
@@ -48,6 +50,13 @@ export default function RegisterPage() {
       <p className="text-sm text-muted-foreground mb-8">
         Support artists. Discover music. Keep it independent.
       </p>
+
+      <a
+        href={googleAuthUrl}
+        className="w-full mb-4 py-3 razor-border font-mono-data text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center gap-2"
+      >
+        Continue with Google
+      </a>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>

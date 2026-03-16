@@ -41,7 +41,7 @@ export function Navbar() {
           <div className="w-7 h-7 bg-accent flex items-center justify-center">
             <span className="text-accent-foreground font-black text-xs">W</span>
           </div>
-          <span className="font-display text-sm tracking-tight hidden sm:block">WAMM</span>
+          <span className="font-display text-sm tracking-tight hidden sm:block">WAMM HUB</span>
         </Link>
 
         {/* Desktop Nav */}

@@ -86,7 +86,7 @@ export function GlobalPlayer() {
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 100, opacity: 0 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
-        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-[680px]"
+        className="fixed bottom-3 left-2 right-2 z-50 sm:bottom-6 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-[calc(100%-2rem)] sm:max-w-[680px]"
       >
         <audio
           ref={audioRef}
@@ -107,8 +107,8 @@ export function GlobalPlayer() {
           }}
         />
 
-        <div className="bg-background/98 backdrop-blur-xl border razor-border shadow-2xl shadow-background/80 px-4 py-3 flex items-center gap-4">
-          <div className="w-10 h-10 bg-secondary overflow-hidden flex-shrink-0">
+        <div className="bg-background/98 backdrop-blur-xl border razor-border shadow-2xl shadow-background/80 px-3 py-2 sm:px-4 sm:py-3 flex items-center gap-2 sm:gap-4">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-secondary overflow-hidden flex-shrink-0">
             {currentTrack.coverArtUrl ? (
               <img
                 src={currentTrack.coverArtUrl}
@@ -120,7 +120,7 @@ export function GlobalPlayer() {
             )}
           </div>
 
-          <div className="min-w-0 flex-shrink-0 w-28">
+          <div className="min-w-0 flex-shrink-0 w-20 sm:w-28">
             <h4 className="text-xs font-bold uppercase tracking-tight truncate">
               {currentTrack.title}
             </h4>
@@ -155,7 +155,7 @@ export function GlobalPlayer() {
           </div>
 
           <div className="flex-1 flex items-center gap-2 min-w-0">
-            <span className="font-mono-data text-muted-foreground flex-shrink-0 w-8 text-right">
+            <span className="font-mono-data text-muted-foreground flex-shrink-0 w-8 text-right hidden min-[420px]:block">
               {formatDuration(currentTime)}
             </span>
             <div
@@ -172,7 +172,7 @@ export function GlobalPlayer() {
                 style={{ left: `${progress}%` }}
               />
             </div>
-            <span className="font-mono-data text-muted-foreground flex-shrink-0 w-8">
+            <span className="font-mono-data text-muted-foreground flex-shrink-0 w-8 text-right">
               {formatDuration(currentTrack.duration)}
             </span>
           </div>

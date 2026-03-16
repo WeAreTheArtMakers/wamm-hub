@@ -151,6 +151,13 @@ export interface Order {
   createdAt: string;
 }
 
+export interface PurchasePayload {
+  paymentMethod?: "STRIPE" | "CRYPTO" | "MANUAL";
+  walletAddress?: string;
+  txHash?: string;
+  ibanReference?: string;
+}
+
 export interface ReleasePurchaseResponse {
   order: Order;
   message: string;

@@ -1,10 +1,17 @@
 import { Router } from "express";
+import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth.js";
 import { serializeOrder } from "../lib/serializers.js";
 
 const router = Router();
 const PLATFORM_FEE_RATE = 0.03;
+const purchaseSchema = z.object({
+  paymentMethod: z.enum(["STRIPE", "CRYPTO", "MANUAL"]).default("MANUAL"),
+  walletAddress: z.string().trim().min(6).optional(),
+  txHash: z.string().trim().min(10).optional(),
+  ibanReference: z.string().trim().min(3).optional(),
+});
 
 const asyncHandler =
   (handler) =>
@@ -20,10 +27,8 @@ router.post(
   "/release/:releaseId",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const paymentMethod =
-      req.body?.paymentMethod === "CRYPTO" || req.body?.paymentMethod === "MANUAL"
-        ? req.body.paymentMethod
-        : "STRIPE";
+    const payload = purchaseSchema.parse(req.body ?? {});
+    const paymentMethod = payload.paymentMethod;
 
     const release = await prisma.release.findUnique({
       where: { id: req.params.releaseId },
@@ -44,6 +49,19 @@ router.post(
 
     const platformFee = Number((release.price * PLATFORM_FEE_RATE).toFixed(2));
     const artistPayout = Number((release.price - platformFee).toFixed(2));
+    const paymentReference =
+      paymentMethod === "CRYPTO"
+        ? payload.txHash ?? (payload.walletAddress ? `wallet:${payload.walletAddress}` : null)
+        : payload.ibanReference
+          ? `iban:${payload.ibanReference}`
+          : null;
+
+    if (paymentMethod === "CRYPTO" && !paymentReference) {
+      res.status(400).json({
+        message: "Wallet connection is required for crypto purchases.",
+      });
+      return;
+    }
 
     const order = await prisma.order.create({
       data: {
@@ -58,6 +76,7 @@ router.post(
         platformFee,
         artistPayout,
         paymentMethod,
+        cryptoTxHash: paymentReference ?? undefined,
         createdAt: new Date(),
       },
     });

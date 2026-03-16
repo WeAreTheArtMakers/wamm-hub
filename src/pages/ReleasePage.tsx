@@ -1,7 +1,15 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Play, Share2, Heart, ShoppingCart, ArrowLeft } from "lucide-react";
+import {
+  Play,
+  Share2,
+  Heart,
+  ShoppingCart,
+  ArrowLeft,
+  Wallet,
+  Landmark,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import { TrackList } from "@/components/music/TrackList";
 import { WaveformDisplay } from "@/components/music/WaveformDisplay";
@@ -13,9 +21,33 @@ import { usePlayer } from "@/store/usePlayer";
 
 const PLATFORM_FEE_RATE = 0.03;
 
+type PaymentMethod = "MANUAL" | "CRYPTO";
+type EthereumProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
+
+const getArtistPaymentInfo = (artistSlug: string) => {
+  if (artistSlug === "baran-gulesen") {
+    return {
+      beneficiary: "Baran Gulesen",
+      iban: "TR12 0006 7010 0000 0000 0000 00",
+      note: "Use release slug as transfer reference.",
+    };
+  }
+
+  return {
+    beneficiary: "Artist Wallet",
+    iban: "Ask artist for IBAN",
+    note: "Artist-specific payment details are provided after checkout.",
+  };
+};
+
 export default function ReleasePage() {
   const { slug } = useParams<{ slug: string }>();
   const setTrack = usePlayer((state) => state.setTrack);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MANUAL");
+  const [walletAddress, setWalletAddress] = useState("");
+  const [ibanReference, setIbanReference] = useState("");
   const [downloadItems, setDownloadItems] = useState<
     Array<{ trackId: string; title: string; url: string; format: string }>
   >([]);
@@ -27,8 +59,17 @@ export default function ReleasePage() {
   });
 
   const purchaseMutation = useMutation({
-    mutationFn: async (releaseId: string) => {
-      const purchase = await api.purchaseRelease(releaseId, "MANUAL");
+    mutationFn: async (payload: {
+      releaseId: string;
+      paymentMethod: PaymentMethod;
+      walletAddress?: string;
+      ibanReference?: string;
+    }) => {
+      const purchase = await api.purchaseRelease(payload.releaseId, {
+        paymentMethod: payload.paymentMethod,
+        walletAddress: payload.walletAddress,
+        ibanReference: payload.ibanReference,
+      });
       const downloads = await api.getOrderDownloads(purchase.order.id);
       return downloads.downloads;
     },
@@ -65,6 +106,7 @@ export default function ReleasePage() {
     release.totalLikes ?? releaseTracks.reduce((sum, track) => sum + track.likes, 0);
   const platformFee = release.price * PLATFORM_FEE_RATE;
   const artistNet = release.price - platformFee;
+  const artistPaymentInfo = getArtistPaymentInfo(release.artistSlug);
 
   const handlePlayAll = () => {
     if (releaseTracks.length === 0) return;
@@ -81,13 +123,42 @@ export default function ReleasePage() {
     );
   };
 
+  const connectWallet = async () => {
+    const provider = (window as unknown as { ethereum?: EthereumProvider }).ethereum;
+    if (!provider) {
+      alert("No wallet detected. Install MetaMask or another EVM wallet.");
+      return;
+    }
+    try {
+      const accounts = await provider.request({
+        method: "eth_requestAccounts",
+      });
+      if (Array.isArray(accounts) && typeof accounts[0] === "string") {
+        setWalletAddress(accounts[0]);
+      }
+    } catch {
+      alert("Wallet connection request was rejected.");
+    }
+  };
+
   const handleBuy = () => {
     const user = getSessionUser();
     if (!user) {
       window.location.href = "/login";
       return;
     }
-    purchaseMutation.mutate(release.id);
+
+    if (paymentMethod === "CRYPTO" && !walletAddress) {
+      void connectWallet();
+      return;
+    }
+
+    purchaseMutation.mutate({
+      releaseId: release.id,
+      paymentMethod,
+      walletAddress: paymentMethod === "CRYPTO" ? walletAddress : undefined,
+      ibanReference: paymentMethod === "MANUAL" ? ibanReference.trim() : undefined,
+    });
   };
 
   return (
@@ -103,7 +174,7 @@ export default function ReleasePage() {
         <ArrowLeft className="w-3 h-3" /> Back
       </Link>
 
-      <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] lg:grid-cols-[400px_1fr] gap-8 mb-12">
+      <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] lg:grid-cols-[400px_1fr] gap-6 md:gap-8 mb-12">
         <div className="space-y-4">
           <div className="aspect-square overflow-hidden bg-secondary">
             <img src={cover} alt={release.title} className="w-full h-full object-cover" />
@@ -111,6 +182,72 @@ export default function ReleasePage() {
 
           <div className="razor-border p-4 space-y-3 surface">
             <span className="font-mono-data text-muted-foreground">Order Breakdown</span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentMethod("MANUAL")}
+                className={`px-3 py-2 font-mono-data transition-colors ${
+                  paymentMethod === "MANUAL"
+                    ? "bg-foreground text-background"
+                    : "razor-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Landmark className="inline w-3 h-3 mr-1" />
+                IBAN
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentMethod("CRYPTO")}
+                className={`px-3 py-2 font-mono-data transition-colors ${
+                  paymentMethod === "CRYPTO"
+                    ? "bg-foreground text-background"
+                    : "razor-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Wallet className="inline w-3 h-3 mr-1" />
+                CRYPTO
+              </button>
+            </div>
+
+            {paymentMethod === "MANUAL" ? (
+              <div className="space-y-2 text-xs bg-secondary/60 p-3 razor-border">
+                <p className="text-muted-foreground">
+                  Beneficiary:{" "}
+                  <span className="text-foreground">{artistPaymentInfo.beneficiary}</span>
+                </p>
+                <p className="text-muted-foreground break-all">
+                  IBAN: <span className="text-foreground">{artistPaymentInfo.iban}</span>
+                </p>
+                <p className="text-muted-foreground">{artistPaymentInfo.note}</p>
+                <label className="block text-muted-foreground font-mono-data">
+                  Transfer Reference
+                </label>
+                <input
+                  value={ibanReference}
+                  onChange={(event) => setIbanReference(event.target.value)}
+                  placeholder={`REF-${release.slug.toUpperCase()}`}
+                  className="w-full px-2 py-2 bg-background razor-border text-foreground"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2 text-xs bg-secondary/60 p-3 razor-border">
+                <p className="text-muted-foreground">
+                  Connect wallet to continue with crypto payment.
+                </p>
+                {walletAddress ? (
+                  <p className="text-foreground break-all">{walletAddress}</p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={connectWallet}
+                    className="w-full py-2 razor-border font-mono-data text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Connect Wallet
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span>Release Price</span>
@@ -135,7 +272,7 @@ export default function ReleasePage() {
               {purchaseMutation.isPending
                 ? "Processing..."
                 : release.isForSale
-                  ? `Buy & Download — $${release.price.toFixed(2)}`
+                  ? `${paymentMethod === "CRYPTO" ? "Pay with Crypto" : "Confirm IBAN Payment"} — $${release.price.toFixed(2)}`
                   : "Not For Sale"}
             </button>
             {purchaseMutation.isError && (
@@ -223,13 +360,27 @@ export default function ReleasePage() {
               <span className="font-mono-data text-muted-foreground">
                 {releaseTracks[0].title} — Waveform
               </span>
-              <WaveformDisplay
-                waveform={releaseTracks[0].waveform}
-                duration={releaseTracks[0].duration}
-                trackId={releaseTracks[0].id}
-                comments={releaseTracks[0].comments}
-                height={80}
-              />
+              <div className="razor-border p-2 sm:p-3">
+                <WaveformDisplay
+                  waveform={releaseTracks[0].waveform}
+                  duration={releaseTracks[0].duration}
+                  trackId={releaseTracks[0].id}
+                  comments={releaseTracks[0].comments}
+                  height={72}
+                />
+              </div>
+              {releaseTracks[0].comments.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {releaseTracks[0].comments.slice(0, 5).map((comment) => (
+                    <span
+                      key={comment.id}
+                      className="text-xs text-muted-foreground razor-border px-2 py-1"
+                    >
+                      {comment.timestamp}s · {comment.username}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

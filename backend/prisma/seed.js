@@ -12,10 +12,25 @@ const hashPassword = (input) =>
 
 const now = () => new Date();
 
-const listeners = [
-  { id: "u_listener_1", email: "listener1@wamm.local" },
-  { id: "u_listener_2", email: "listener2@wamm.local" },
+const baseListeners = [
+  { id: "u_listener_1", email: "listener1@wamm.local", password: DEFAULT_PASSWORD },
+  { id: "u_listener_2", email: "listener2@wamm.local", password: DEFAULT_PASSWORD },
 ];
+
+const commentAccounts = [
+  { id: "u_cm_arda", username: "ArdaSynth", email: "arda.synth@wamm.local", password: "Arda!808wave" },
+  { id: "u_cm_lina", username: "LinaEcho", email: "lina.echo@wamm.local", password: "Lina!Echo77" },
+  { id: "u_cm_mert", username: "MertPulse", email: "mert.pulse@wamm.local", password: "Mert#Pulse24" },
+  { id: "u_cm_eylul", username: "EylulSky", email: "eylul.sky@wamm.local", password: "Eylul@Sky88" },
+  { id: "u_cm_kaan", username: "KaanNebula", email: "kaan.nebula@wamm.local", password: "Kaan$Nebula9" },
+  { id: "u_cm_sena", username: "SenaDrift", email: "sena.drift@wamm.local", password: "SenaDrift!42" },
+  { id: "u_cm_ozan", username: "OzanGrid", email: "ozan.grid@wamm.local", password: "OzanGrid#5" },
+  { id: "u_cm_zeynep", username: "ZeynepFlux", email: "zeynep.flux@wamm.local", password: "Flux&Zeynep7" },
+  { id: "u_cm_jade", username: "JadeNoise", email: "jade.noise@wamm.local", password: "JadeNoise!31" },
+  { id: "u_cm_bora", username: "BoraLoop", email: "bora.loop@wamm.local", password: "BoraLoop*19" },
+];
+
+const listeners = [...baseListeners, ...commentAccounts];
 
 const artistAccounts = [
   {
@@ -23,8 +38,81 @@ const artistAccounts = [
     email: "barangulesen@gmail.com",
     slug: "baran-gulesen",
     name: "Baran Gulesen",
+    password: BARAN_PASSWORD,
   },
 ];
+
+const englishStarts = [
+  "That transition hits hard.",
+  "This mix feels huge on headphones.",
+  "Love the groove here.",
+  "The atmosphere is unreal.",
+  "Bass sits perfectly in this section.",
+  "This drop is so clean.",
+  "The synth texture is beautiful.",
+  "Drums are super tight.",
+  "Great movement in the stereo field.",
+  "This part deserves a replay.",
+];
+
+const englishEnds = [
+  "Instant save for me.",
+  "Pure futuristic energy.",
+  "Feels cinematic in the best way.",
+  "Exactly what I needed tonight.",
+  "This section is addictive.",
+  "Huge respect to the producer.",
+  "Sound design is on point.",
+  "Perfect late-night vibe.",
+  "I keep coming back to this moment.",
+  "Top tier production.",
+];
+
+const turkishStarts = [
+  "Buradaki geçiş çok iyi olmuş.",
+  "Kulaklıkta inanılmaz duyuluyor.",
+  "Ritim burada çok sağlam.",
+  "Atmosfer efsane bir seviyede.",
+  "Baslar net ve dengeli.",
+  "Bu kısım direkt tekrar dinletiyor.",
+  "Synth tonu çok karakterli.",
+  "Davullar aşırı temiz.",
+  "Buradaki enerji çok yüksek.",
+  "Bu an şarkının zirvesi.",
+];
+
+const turkishEnds = [
+  "Listeme direkt ekledim.",
+  "Prodüksiyon gerçekten çok güçlü.",
+  "Gece sürüşü için birebir.",
+  "Tekrar tekrar dinlenir.",
+  "Burası ayrı bir dünya olmuş.",
+  "Detaylar çok iyi düşünülmüş.",
+  "Her dinleyişte yeni bir şey yakalıyorum.",
+  "Çok profesyonel bir iş.",
+  "Yorum bırakmadan geçemedim.",
+  "Tam canlı performanslık bölüm.",
+];
+
+const createRng = (seedInput) => {
+  let seed = 0;
+  for (const char of seedInput) {
+    seed = (seed * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return () => {
+    seed = (1664525 * seed + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+};
+
+const createCommentText = (rng) => {
+  const isEnglish = rng() < 0.5;
+  const starts = isEnglish ? englishStarts : turkishStarts;
+  const ends = isEnglish ? englishEnds : turkishEnds;
+  const start = starts[Math.floor(rng() * starts.length)];
+  const end = ends[Math.floor(rng() * ends.length)];
+  return `${start} ${end}`;
+};
 
 async function clearDatabase() {
   await prisma.trackComment.deleteMany();
@@ -45,18 +133,55 @@ async function seedUsers() {
       ...listeners.map((listener) => ({
         id: listener.id,
         email: listener.email,
-        passwordHash: hashPassword(DEFAULT_PASSWORD),
+        passwordHash: hashPassword(listener.password),
         role: "LISTENER",
       })),
       ...artistAccounts.map((artist) => ({
         id: artist.id,
         email: artist.email,
-        passwordHash: hashPassword(
-          artist.slug === "baran-gulesen" ? BARAN_PASSWORD : DEFAULT_PASSWORD,
-        ),
+        passwordHash: hashPassword(artist.password),
         role: "ARTIST",
       })),
     ],
+  });
+}
+
+const buildTrackComments = (track, trackIndex) => {
+  const rng = createRng(`${track.id}:${trackIndex}`);
+  const total = 42 + Math.floor(rng() * 9);
+  const rows = [];
+  const normalizedTrackId = track.id.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+
+  for (let i = 0; i < total; i += 1) {
+    const user = commentAccounts[Math.floor(rng() * commentAccounts.length)];
+    const spread = Math.max(6, track.duration - 4);
+    const timestamp = Math.max(2, Math.min(track.duration - 1, 2 + Math.floor(rng() * spread)));
+    const createdAt = new Date(Date.now() - Math.floor(rng() * 16 * 24 * 60 * 60 * 1000));
+
+    rows.push({
+      id: `c_${normalizedTrackId}_${String(i + 1).padStart(2, "0")}`,
+      trackId: track.id,
+      userId: user.id,
+      username: user.username,
+      avatarUrl: "",
+      content: createCommentText(rng),
+      timestamp,
+      createdAt,
+    });
+  }
+
+  rows.sort((a, b) => a.timestamp - b.timestamp || a.createdAt - b.createdAt);
+  return rows;
+};
+
+async function seedTrackComments(createdTracks) {
+  const commentRows = createdTracks.flatMap((track, index) =>
+    buildTrackComments(track, index),
+  );
+  if (commentRows.length === 0) return;
+
+  await prisma.trackComment.createMany({
+    data: commentRows,
   });
 }
 
@@ -155,6 +280,7 @@ async function seedCatalog() {
     }),
   );
 
+  const createdTracks = [];
   for (let i = 0; i < catalog.tracks.length; i += 1) {
     const track = catalog.tracks[i];
     const artist = catalog.artists.find((entry) => entry.slug === track.artistSlug);
@@ -182,14 +308,21 @@ async function seedCatalog() {
         waveformJson: JSON.stringify(track.waveform),
         price: 0.99,
         currency: "USD",
-          isForSale: true,
-          sourcePath: track.sourcePath,
-          plays: 4_000 + i * 320,
-          likes: 180 + i * 18,
-          createdAt: now(),
-        },
-      });
+        isForSale: true,
+        sourcePath: track.sourcePath,
+        plays: 4_000 + i * 320,
+        likes: 180 + i * 18,
+        createdAt: now(),
+      },
+    });
+
+    createdTracks.push({
+      id: track.id,
+      duration: Math.max(30, track.duration || 30),
+    });
   }
+
+  await seedTrackComments(createdTracks);
 
   const firstRelease = await prisma.release.findFirst({
     where: { published: true },
@@ -230,8 +363,7 @@ async function main() {
       prisma.track.count(),
     ]);
 
-    const hasCatalogData =
-      artistCount > 0 && releaseCount > 0 && trackCount > 0;
+    const hasCatalogData = artistCount > 0 && releaseCount > 0 && trackCount > 0;
 
     if (hasCatalogData) {
       console.log("Seed skipped: existing catalog detected.");

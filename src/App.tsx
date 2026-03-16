@@ -15,6 +15,7 @@ import SearchPage from "./pages/SearchPage.tsx";
 import LoginPage from "./pages/LoginPage.tsx";
 import RegisterPage from "./pages/RegisterPage.tsx";
 import StudioPage from "./pages/StudioPage.tsx";
+import AuthSuccessPage from "./pages/AuthSuccessPage.tsx";
 
 const queryClient = new QueryClient();
 
@@ -35,6 +36,7 @@ const App = () => (
             <Route path="/search" element={<SearchPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/auth/success" element={<AuthSuccessPage />} />
             <Route path="/studio" element={<StudioPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -8,7 +8,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Navbar />
-      <main className={`pt-14 ${currentTrack ? 'pb-28' : 'pb-8'}`}>
+      <main className={`pt-14 ${currentTrack ? 'pb-32 sm:pb-28' : 'pb-8'}`}>
         {children}
       </main>
       <GlobalPlayer />

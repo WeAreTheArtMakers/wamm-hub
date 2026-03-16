@@ -3,7 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth.js";
-import { buildUniqueSlug, humanizeSlug, slugify } from "../lib/text.js";
+import { buildUniqueSlug, humanizeSlug } from "../lib/text.js";
 
 const router = Router();
 
@@ -47,6 +47,206 @@ const asyncHandler =
       next(error);
     }
   };
+
+const authStateSecret =
+  process.env.AUTH_STATE_SECRET ?? process.env.AUTH_SECRET ?? "wamm-hub-auth-state";
+
+const buildApiBaseUrl = () =>
+  (
+    process.env.PUBLIC_BASE_URL ??
+    `http://localhost:${process.env.PORT ?? process.env.API_PORT ?? 3001}`
+  ).replace(/\/$/, "");
+
+const buildFrontendBaseUrl = () =>
+  (
+    process.env.FRONTEND_BASE_URL ??
+    process.env.PUBLIC_BASE_URL ??
+    "http://localhost:8080"
+  ).replace(/\/$/, "");
+
+const getGoogleConfig = () => {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  const redirectUri =
+    process.env.GOOGLE_REDIRECT_URI?.trim() ||
+    `${buildApiBaseUrl()}/api/auth/google/callback`;
+
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret, redirectUri };
+};
+
+const sanitizeReturnTo = (candidate) => {
+  if (typeof candidate !== "string" || !candidate.trim()) return "/auth/success";
+  if (!candidate.startsWith("/")) return "/auth/success";
+  if (candidate.startsWith("//")) return "/auth/success";
+  return candidate;
+};
+
+const signState = (payload) => {
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", authStateSecret)
+    .update(encodedPayload)
+    .digest("base64url");
+  return `${encodedPayload}.${signature}`;
+};
+
+const parseState = (value) => {
+  if (typeof value !== "string" || !value.includes(".")) return null;
+  const [encodedPayload, signature] = value.split(".", 2);
+  if (!encodedPayload || !signature) return null;
+  const expectedSignature = crypto
+    .createHmac("sha256", authStateSecret)
+    .update(encodedPayload)
+    .digest("base64url");
+  if (signature !== expectedSignature) return null;
+
+  try {
+    const payload = JSON.parse(
+      Buffer.from(encodedPayload, "base64url").toString("utf8"),
+    );
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+};
+
+const appendQuery = (path, params) => {
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}${params.toString()}`;
+};
+
+const redirectToLoginWithError = (res, message) => {
+  const frontendBaseUrl = buildFrontendBaseUrl();
+  const params = new URLSearchParams({ error: message });
+  res.redirect(`${frontendBaseUrl}/login?${params.toString()}`);
+};
+
+router.get(
+  "/google/start",
+  asyncHandler(async (req, res) => {
+    const googleConfig = getGoogleConfig();
+    if (!googleConfig) {
+      res
+        .status(503)
+        .json({ message: "Google authentication is not configured yet." });
+      return;
+    }
+
+    const returnTo = sanitizeReturnTo(req.query.returnTo);
+    const state = signState({
+      returnTo,
+      nonce: crypto.randomBytes(8).toString("hex"),
+      iat: Date.now(),
+    });
+
+    const authParams = new URLSearchParams({
+      client_id: googleConfig.clientId,
+      redirect_uri: googleConfig.redirectUri,
+      response_type: "code",
+      scope: "openid email profile",
+      access_type: "offline",
+      prompt: "consent",
+      state,
+    });
+
+    res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${authParams}`);
+  }),
+);
+
+router.get(
+  "/google/callback",
+  asyncHandler(async (req, res) => {
+    const googleConfig = getGoogleConfig();
+    if (!googleConfig) {
+      redirectToLoginWithError(res, "Google authentication is not configured.");
+      return;
+    }
+
+    if (typeof req.query.error === "string") {
+      redirectToLoginWithError(res, "Google sign-in was cancelled.");
+      return;
+    }
+
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    const statePayload = parseState(req.query.state);
+    if (!code || !statePayload) {
+      redirectToLoginWithError(res, "Google sign-in failed (invalid callback).");
+      return;
+    }
+
+    const returnTo = sanitizeReturnTo(statePayload.returnTo);
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: googleConfig.clientId,
+        client_secret: googleConfig.clientSecret,
+        redirect_uri: googleConfig.redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      redirectToLoginWithError(res, "Google token exchange failed.");
+      return;
+    }
+
+    const tokenPayload = await tokenResponse.json();
+    const accessToken =
+      tokenPayload && typeof tokenPayload.access_token === "string"
+        ? tokenPayload.access_token
+        : "";
+    if (!accessToken) {
+      redirectToLoginWithError(res, "Google access token is missing.");
+      return;
+    }
+
+    const userInfoResponse = await fetch(
+      "https://www.googleapis.com/oauth2/v3/userinfo",
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+
+    if (!userInfoResponse.ok) {
+      redirectToLoginWithError(res, "Failed to load Google user profile.");
+      return;
+    }
+
+    const profile = await userInfoResponse.json();
+    const email = typeof profile.email === "string" ? profile.email.trim() : "";
+    if (!email) {
+      redirectToLoginWithError(res, "Google account email not available.");
+      return;
+    }
+
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const fallbackSecret = `${profile.sub ?? email}:${Date.now()}`;
+      user = await prisma.user.create({
+        data: {
+          email,
+          passwordHash: hashPassword(`google:${fallbackSecret}`),
+          role: "LISTENER",
+        },
+      });
+    }
+
+    const frontendBaseUrl = buildFrontendBaseUrl();
+    const publicUser = toPublicUser(user);
+    const params = new URLSearchParams({
+      token: buildToken(user),
+      id: publicUser.id,
+      email: publicUser.email,
+      role: publicUser.role,
+      provider: "google",
+    });
+    res.redirect(`${frontendBaseUrl}${appendQuery(returnTo, params)}`);
+  }),
+);
 
 router.post(
   "/register",
