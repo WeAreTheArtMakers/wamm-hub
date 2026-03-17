@@ -35,7 +35,12 @@ export const serializeTrack = (track) => ({
   artistName: track.artist?.name ?? "",
   artistSlug: track.artist?.slug ?? "",
   releaseId: track.releaseId ?? undefined,
-  coverArtUrl: track.coverArtUrl ?? "",
+  coverArtUrl:
+    track.coverArtUrl &&
+    typeof track.coverArtUrl === "string" &&
+    track.coverArtUrl.startsWith("/generated/covers/")
+      ? track.release?.coverArtUrl ?? track.coverArtUrl
+      : track.coverArtUrl ?? track.release?.coverArtUrl ?? "",
   audioUrl: track.audioUrl,
   previewUrl: track.previewUrl ?? track.audioUrl,
   highQualityUrl: track.highQualityUrl ?? undefined,

@@ -246,6 +246,18 @@ app.use((error, _req, res, _next) => {
     return;
   }
 
+  const statusCode = Number(error?.statusCode ?? error?.status);
+  if (Number.isFinite(statusCode) && statusCode >= 400 && statusCode < 500) {
+    if (statusCode === 404) {
+      res.status(404).json({ message: "Resource not found." });
+      return;
+    }
+    res.status(statusCode).json({
+      message: error?.message || "Request failed.",
+    });
+    return;
+  }
+
   console.error(error);
   res.status(500).json({ message: "Unexpected server error." });
 });

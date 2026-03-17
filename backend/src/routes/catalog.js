@@ -13,6 +13,13 @@ const router = Router();
 const trackInclude = {
   artist: { select: { id: true, name: true, slug: true } },
   genre: { select: { name: true } },
+  release: {
+    select: {
+      id: true,
+      slug: true,
+      coverArtUrl: true,
+    },
+  },
   comments: { orderBy: { createdAt: "asc" } },
 };
 
