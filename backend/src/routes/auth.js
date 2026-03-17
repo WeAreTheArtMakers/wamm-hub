@@ -174,6 +174,28 @@ const redirectToLoginWithError = (res, message) => {
   res.redirect(`${frontendBaseUrl}/login?${params.toString()}`);
 };
 
+const parseGoogleErrorPayload = async (response) => {
+  try {
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object") return null;
+    const error =
+      typeof payload.error === "string" && payload.error.trim()
+        ? payload.error.trim()
+        : "";
+    const description =
+      typeof payload.error_description === "string" && payload.error_description.trim()
+        ? payload.error_description.trim()
+        : "";
+    if (!error && !description) return null;
+    return {
+      error,
+      description,
+    };
+  } catch {
+    return null;
+  }
+};
+
 router.get(
   "/google/start",
   asyncHandler(async (req, res) => {
@@ -261,7 +283,13 @@ const googleCallbackHandler = asyncHandler(async (req, res) => {
     });
 
     if (!tokenResponse.ok) {
-      redirectToLoginWithError(res, "Google token exchange failed.");
+      const googleError = await parseGoogleErrorPayload(tokenResponse);
+      const reason = googleError?.error || `http_${tokenResponse.status}`;
+      const detail = googleError?.description ? ` (${googleError.description})` : "";
+      console.error(
+        `[google-oauth] token exchange failed: ${reason}${detail}; redirectUri=${googleConfig.redirectUri}`,
+      );
+      redirectToLoginWithError(res, `Google token exchange failed: ${reason}${detail}`);
       return;
     }
 
@@ -333,6 +361,8 @@ router.get(
       clientId: googleConfig.clientId,
       redirectUri: googleConfig.redirectUri,
       frontendBaseUrl: buildFrontendBaseUrl(),
+      hasClientSecret: Boolean(googleConfig.clientSecret),
+      usePkce: googleConfig.usePkce,
       note:
         "Add this redirectUri to Google Cloud Console > OAuth Client > Authorized redirect URIs.",
     });
