@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ChangeEventHandler } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -25,6 +25,67 @@ const toPositiveNumber = (value: string): number | undefined => {
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
 };
+
+type FileSelectorProps = {
+  name?: string;
+  accept?: string;
+  multiple?: boolean;
+  buttonLabel: string;
+  helperText?: string;
+  emptyLabel?: string;
+  onChange?: ChangeEventHandler<HTMLInputElement>;
+};
+
+function FileSelector({
+  name,
+  accept,
+  multiple = false,
+  buttonLabel,
+  helperText,
+  emptyLabel = "No file selected",
+  onChange,
+}: FileSelectorProps) {
+  const inputId = useId();
+  const [selectionLabel, setSelectionLabel] = useState(emptyLabel);
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 min-w-0">
+        <input
+          id={inputId}
+          name={name}
+          type="file"
+          accept={accept}
+          multiple={multiple}
+          className="sr-only"
+          onChange={(event) => {
+            const files = event.target.files;
+            if (!files || files.length === 0) {
+              setSelectionLabel(emptyLabel);
+            } else if (multiple && files.length > 1) {
+              setSelectionLabel(`${files.length} files selected`);
+            } else {
+              setSelectionLabel(files[0]?.name || emptyLabel);
+            }
+            onChange?.(event);
+          }}
+        />
+        <label
+          htmlFor={inputId}
+          className="px-3 py-2 razor-border font-mono-data text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer whitespace-nowrap"
+        >
+          {buttonLabel}
+        </label>
+        <span className="font-mono-data text-xs text-muted-foreground truncate">
+          {selectionLabel}
+        </span>
+      </div>
+      {helperText && (
+        <p className="font-mono-data text-[11px] text-muted-foreground/90">{helperText}</p>
+      )}
+    </div>
+  );
+}
 
 export default function StudioPage() {
   const queryClient = useQueryClient();
@@ -556,12 +617,12 @@ export default function StudioPage() {
                 <label className="font-mono-data text-muted-foreground mb-1 block">
                   Track Files
                 </label>
-                <input
-                  type="file"
+                <FileSelector
                   multiple
                   accept=".mp3,.wav,.flac,.m4a"
+                  buttonLabel="Choose Track Files"
+                  helperText="Uploads one or more new audio files for this release."
                   onChange={(event) => setTracks(Array.from(event.target.files || []))}
-                  className="w-full text-sm"
                 />
               </div>
 
@@ -569,11 +630,11 @@ export default function StudioPage() {
                 <label className="font-mono-data text-muted-foreground mb-1 block">
                   Release Cover
                 </label>
-                <input
-                  type="file"
+                <FileSelector
                   accept=".jpg,.jpeg,.png,.webp"
+                  buttonLabel="Choose Release Cover"
+                  helperText="Updates the release artwork image."
                   onChange={(event) => setCover(event.target.files?.[0])}
-                  className="w-full text-sm"
                 />
               </div>
 
@@ -687,11 +748,11 @@ export default function StudioPage() {
                         <input type="checkbox" name="syncTrackCovers" defaultChecked />
                         Apply cover to tracks
                       </label>
-                      <input
-                        type="file"
+                      <FileSelector
                         name="cover"
                         accept=".jpg,.jpeg,.png,.webp"
-                        className="w-full text-sm"
+                        buttonLabel="Choose Release Cover"
+                        helperText="Change release artwork and optionally sync to track covers."
                       />
                     </div>
 
@@ -797,17 +858,17 @@ export default function StudioPage() {
                             className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
                             placeholder="Key"
                           />
-                          <input
-                            type="file"
+                          <FileSelector
                             name="cover"
                             accept=".jpg,.jpeg,.png,.webp"
-                            className="w-full text-sm"
+                            buttonLabel="Choose Track Cover"
+                            helperText="Changes only this track cover image."
                           />
-                          <input
-                            type="file"
+                          <FileSelector
                             name="audio"
                             accept=".mp3,.wav,.flac,.m4a"
-                            className="w-full text-sm"
+                            buttonLabel="Choose Track Audio"
+                            helperText="Replaces this track audio file."
                           />
                           <div className="flex flex-wrap items-center gap-3">
                             <label className="flex items-center gap-2 text-xs font-mono-data text-muted-foreground">
