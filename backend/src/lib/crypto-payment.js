@@ -15,7 +15,13 @@ const splitEnabledFromEnv =
 const splitEnabled = splitEnabledFromEnv && Boolean(splitContractAddress);
 const effectiveSplitContractAddress = splitEnabled ? splitContractAddress : "";
 const platformFeeRate = splitEnabled ? BASE_PLATFORM_FEE_RATE : 0;
-const BINANCE_SPOT_TICKER_PRICE_URL = "https://api.binance.com/api/v3/ticker/price";
+const BINANCE_SPOT_TICKER_PRICE_URLS = [
+  "https://api.binance.com/api/v3/ticker/price",
+  "https://api1.binance.com/api/v3/ticker/price",
+  "https://api2.binance.com/api/v3/ticker/price",
+  "https://api3.binance.com/api/v3/ticker/price",
+  "https://data-api.binance.vision/api/v3/ticker/price",
+];
 const PRICE_CACHE_TTL_MS = 45_000;
 
 const txHashRegex = /^0x[a-fA-F0-9]{64}$/;
@@ -93,21 +99,36 @@ const fetchUsdPriceFromBinance = async (tickerSymbol) => {
     return cached.price;
   }
 
-  const response = await fetch(
-    `${BINANCE_SPOT_TICKER_PRICE_URL}?symbol=${encodeURIComponent(tickerSymbol)}`,
+  let lastError = null;
+  for (const endpoint of BINANCE_SPOT_TICKER_PRICE_URLS) {
+    try {
+      const response = await fetch(`${endpoint}?symbol=${encodeURIComponent(tickerSymbol)}`, {
+        headers: {
+          accept: "application/json",
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`status ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const price = Number(payload?.price);
+      if (!Number.isFinite(price) || price <= 0) {
+        throw new Error("invalid price payload");
+      }
+
+      priceCache.set(tickerSymbol, { price, timestamp: now });
+      return price;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(
+    `Binance price API failed for ${tickerSymbol}${
+      lastError?.message ? `: ${lastError.message}` : ""
+    }`,
   );
-  if (!response.ok) {
-    throw new Error(`Binance price API failed with status ${response.status}`);
-  }
-
-  const payload = await response.json();
-  const price = Number(payload?.price);
-  if (!Number.isFinite(price) || price <= 0) {
-    throw new Error("Binance price API returned invalid price.");
-  }
-
-  priceCache.set(tickerSymbol, { price, timestamp: now });
-  return price;
 };
 
 const amountToWeiBigInt = (amount) => {
