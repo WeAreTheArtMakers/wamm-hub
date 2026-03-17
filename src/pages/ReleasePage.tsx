@@ -23,8 +23,6 @@ import { api } from "@/lib/api";
 import { getSessionUser } from "@/lib/auth";
 import { formatDuration, formatNumber, trackToPlayerTrack } from "@/lib/music";
 import { usePlayer } from "@/store/usePlayer";
-
-const PLATFORM_FEE_RATE = 0.03;
 const SPLIT_PAY_SELECTOR = "0xe433de36";
 
 type PaymentMethod = "MANUAL" | "CRYPTO";
@@ -232,8 +230,13 @@ export default function ReleasePage() {
     release.totalPlays ?? releaseTracks.reduce((sum, track) => sum + track.plays, 0);
   const totalLikes =
     release.totalLikes ?? releaseTracks.reduce((sum, track) => sum + track.likes, 0);
-  const platformFee = release.price * PLATFORM_FEE_RATE;
+  const quotedPlatformFee = cryptoQuoteQuery.data?.quote.platformFee;
+  const platformFee = Number.isFinite(quotedPlatformFee ?? NaN)
+    ? Number(quotedPlatformFee)
+    : 0;
   const artistNet = release.price - platformFee;
+  const platformFeePercent =
+    release.price > 0 && platformFee > 0 ? Math.round((platformFee / release.price) * 100) : 0;
   const waveformTrack =
     releaseTracks.find((track) => track.id === waveTrackId) || releaseTracks[0] || null;
 
@@ -427,24 +430,24 @@ export default function ReleasePage() {
               if (isWalletRejectedError(splitError)) {
                 throw splitError;
               }
-              setPurchaseStatus(
-                "Split router not available. Please approve artist payout and platform fee transfers.",
-              );
+              setPurchaseStatus("Split router unavailable. Falling back to direct wallet send.");
               artistHash = await sendNativeTransfer(
                 provider,
                 activeWallet,
                 artistPayment.wallet,
                 quotePayload.quote.artistPayout,
               );
-              platformHash = await sendNativeTransfer(
-                provider,
-                activeWallet,
-                quotePayload.verification.platformWallet,
-                quotePayload.quote.platformFee,
-              );
+              if (quotePayload.quote.platformFee > 0) {
+                platformHash = await sendNativeTransfer(
+                  provider,
+                  activeWallet,
+                  quotePayload.verification.platformWallet,
+                  quotePayload.quote.platformFee,
+                );
+              }
             }
           } else {
-            setPurchaseStatus("Please approve artist payout transaction in wallet...");
+            setPurchaseStatus("Please approve wallet payment...");
             artistHash = await sendNativeTransfer(
               provider,
               activeWallet,
@@ -452,13 +455,15 @@ export default function ReleasePage() {
               quotePayload.quote.artistPayout,
             );
 
-            setPurchaseStatus("Please approve platform fee transaction in wallet...");
-            platformHash = await sendNativeTransfer(
-              provider,
-              activeWallet,
-              quotePayload.verification.platformWallet,
-              quotePayload.quote.platformFee,
-            );
+            if (quotePayload.quote.platformFee > 0) {
+              setPurchaseStatus("Please approve platform fee transaction in wallet...");
+              platformHash = await sendNativeTransfer(
+                provider,
+                activeWallet,
+                quotePayload.verification.platformWallet,
+                quotePayload.quote.platformFee,
+              );
+            }
           }
 
           purchaseMutation.mutate({
@@ -613,8 +618,7 @@ export default function ReleasePage() {
             ) : (
               <div className="space-y-2 text-xs bg-secondary/60 p-3 razor-border">
                 <p className="text-muted-foreground">
-                  Connect wallet and pay once. WAMM automatically routes the payment
-                  (97% artist / 3% platform).
+                  Connect wallet and pay. Routing is automatic, no manual address handling.
                 </p>
                 {walletAddress ? (
                   <p className="text-foreground">Connected: {shortenWallet(walletAddress)}</p>
@@ -631,8 +635,8 @@ export default function ReleasePage() {
                 )}
                 <p className="text-accent">
                   {cryptoQuoteQuery.data?.quote.splitContractAddress
-                    ? "Single approval flow is active for this release."
-                    : "If split routing is unavailable, wallet may ask for a second confirmation."}
+                    ? "Auto-split active: 97% artist / 3% platform in one payment."
+                    : "Promo mode active: 100% of payment goes directly to artist wallet."}
                 </p>
               </div>
             )}
@@ -643,7 +647,7 @@ export default function ReleasePage() {
                 <span>${release.price.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-muted-foreground">
-                <span>WAMM Fee (3%)</span>
+                <span>WAMM Fee ({platformFeePercent}%)</span>
                 <span>-${platformFee.toFixed(2)}</span>
               </div>
               <div className="h-px bg-border my-1" />

@@ -1,4 +1,4 @@
-const platformFeeRate = 0.03;
+const BASE_PLATFORM_FEE_RATE = 0.03;
 const platformWallet =
   process.env.PLATFORM_WALLET_ADDRESS?.trim() ||
   "0xc66aC8bcF729a6398bc879B7454B13983220601e";
@@ -10,6 +10,8 @@ const rpcUrl = process.env.CRYPTO_RPC_URL?.trim() || "";
 const splitContractAddress =
   process.env.CRYPTO_SPLIT_CONTRACT_ADDRESS?.trim().toLowerCase() || "";
 const expectedChainId = process.env.CRYPTO_CHAIN_ID?.trim() || "";
+const splitEnabled = Boolean(splitContractAddress);
+const platformFeeRate = splitEnabled ? BASE_PLATFORM_FEE_RATE : 0;
 
 const txHashRegex = /^0x[a-fA-F0-9]{64}$/;
 
@@ -58,12 +60,14 @@ const rpc = async (method, params) => {
 };
 
 export const getCryptoModuleConfig = () => ({
+  basePlatformFeeRate: BASE_PLATFORM_FEE_RATE,
   platformFeeRate,
   platformWallet,
   verifyOnchain,
   verifyStrict,
   splitContractAddress,
   expectedChainId,
+  splitEnabled,
 });
 
 export const buildCryptoQuote = ({ totalAmount, artistWallet, network }) => {
