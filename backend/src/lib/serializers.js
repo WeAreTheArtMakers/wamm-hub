@@ -28,6 +28,22 @@ export const serializeComment = (comment) => ({
   createdAt: formatDate(comment.createdAt),
 });
 
+const isLegacyGeneratedCoverUrl = (value) => {
+  if (!value || typeof value !== "string") return false;
+  return value.toLowerCase().includes("/generated/covers/");
+};
+
+const pickBestTrackCoverUrl = (tracks) => {
+  const list = Array.isArray(tracks) ? tracks : [];
+  const remoteCover = list.find(
+    (track) => track?.coverArtUrl && !isLegacyGeneratedCoverUrl(track.coverArtUrl),
+  )?.coverArtUrl;
+  if (remoteCover) return remoteCover;
+
+  const fallback = list.find((track) => track?.coverArtUrl)?.coverArtUrl;
+  return fallback ?? "";
+};
+
 export const serializeTrack = (track) => ({
   id: track.id,
   title: track.title,
@@ -36,9 +52,7 @@ export const serializeTrack = (track) => ({
   artistSlug: track.artist?.slug ?? "",
   releaseId: track.releaseId ?? undefined,
   coverArtUrl:
-    track.coverArtUrl &&
-    typeof track.coverArtUrl === "string" &&
-    track.coverArtUrl.startsWith("/generated/covers/")
+    isLegacyGeneratedCoverUrl(track.coverArtUrl)
       ? track.release?.coverArtUrl ?? track.coverArtUrl
       : track.coverArtUrl ?? track.release?.coverArtUrl ?? "",
   audioUrl: track.audioUrl,
@@ -66,6 +80,10 @@ export const serializeRelease = (release) => {
   const totalLikes = tracks.reduce((sum, track) => sum + track.likes, 0);
   const communityLikes =
     typeof release._count?.likes === "number" ? release._count.likes : 0;
+  const releaseCover =
+    !isLegacyGeneratedCoverUrl(release.coverArtUrl) && release.coverArtUrl
+      ? release.coverArtUrl
+      : pickBestTrackCoverUrl(release.tracks);
 
   return {
     id: release.id,
@@ -81,7 +99,7 @@ export const serializeRelease = (release) => {
       network: release.artist?.payoutNetwork ?? "",
     },
     type: release.type,
-    coverArtUrl: release.coverArtUrl ?? "",
+    coverArtUrl: releaseCover ?? "",
     description: release.description,
     price: Number(release.price),
     currency: release.currency,
