@@ -212,9 +212,7 @@ router.get(
   }),
 );
 
-router.get(
-  "/google/callback",
-  asyncHandler(async (req, res) => {
+const googleCallbackHandler = asyncHandler(async (req, res) => {
     const googleConfig = getGoogleConfig(req);
     if (!googleConfig) {
       redirectToLoginWithError(res, "Google authentication is not configured.");
@@ -318,8 +316,10 @@ router.get(
       provider: "google",
     });
     res.redirect(`${frontendBaseUrl}${appendQuery(returnTo, params)}`);
-  }),
-);
+});
+
+router.get("/google/callback", googleCallbackHandler);
+router.get("/callback/google", googleCallbackHandler);
 
 router.get(
   "/google/config",
