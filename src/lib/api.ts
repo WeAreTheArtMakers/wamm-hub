@@ -7,6 +7,7 @@ import type {
   HomeResponse,
   Order,
   OrderDownloadsResponse,
+  CryptoQuoteResponse,
   Release,
   ReleasePurchaseResponse,
   SearchResponse,
@@ -159,6 +160,11 @@ export const api = {
     request<{ likedByMe: boolean; totalLikes: number }>(
       `/api/releases/${encodeURIComponent(releaseId)}/like`,
       { method: "POST" },
+    ),
+
+  getCryptoQuote: (releaseId: string) =>
+    request<CryptoQuoteResponse>(
+      `/api/orders/release/${encodeURIComponent(releaseId)}/crypto-quote`,
     ),
 
   getMyOrders: () => request<Order[]>("/api/orders/my"),

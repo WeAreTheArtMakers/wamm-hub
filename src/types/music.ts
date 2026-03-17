@@ -191,6 +191,27 @@ export interface OrderDownloadsResponse {
   }>;
 }
 
+export interface CryptoQuoteResponse {
+  quote: {
+    totalAmount: number;
+    platformFee: number;
+    artistPayout: number;
+    platformWallet: string;
+    artistWallet: string;
+    network: string;
+    splitContractAddress: string;
+    requiresTxHash: boolean;
+  };
+  verification: {
+    platformFeeRate: number;
+    platformWallet: string;
+    verifyOnchain: boolean;
+    verifyStrict: boolean;
+    splitContractAddress: string;
+    expectedChainId: string;
+  };
+}
+
 export interface StudioDashboardResponse {
   artist: Artist;
   releases: Release[];

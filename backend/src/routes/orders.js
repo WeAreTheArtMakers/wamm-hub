@@ -3,13 +3,15 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../lib/auth.js";
 import { serializeOrder } from "../lib/serializers.js";
+import {
+  buildCryptoQuote,
+  getCryptoModuleConfig,
+  verifyCryptoTransaction,
+} from "../lib/crypto-payment.js";
 
 const router = Router();
-const PLATFORM_FEE_RATE = 0.03;
-const PLATFORM_WALLET_ADDRESS =
-  process.env.PLATFORM_WALLET_ADDRESS?.trim() ||
-  "0xc66aC8bcF729a6398bc879B7454B13983220601e";
-const txHashRegex = /^0x[a-fA-F0-9]{64}$/;
+const PLATFORM_FEE_RATE = getCryptoModuleConfig().platformFeeRate;
+const PLATFORM_WALLET_ADDRESS = getCryptoModuleConfig().platformWallet;
 
 const purchaseSchema = z.object({
   paymentMethod: z.enum(["STRIPE", "CRYPTO", "MANUAL"]).default("MANUAL"),
@@ -27,6 +29,38 @@ const asyncHandler =
       next(error);
     }
   };
+
+router.get(
+  "/release/:releaseId/crypto-quote",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const release = await prisma.release.findUnique({
+      where: { id: req.params.releaseId },
+      include: {
+        artist: {
+          select: {
+            payoutWallet: true,
+            payoutNetwork: true,
+          },
+        },
+      },
+    });
+
+    if (!release || !release.published || release.status !== "PUBLISHED") {
+      res.status(404).json({ message: "Release not found." });
+      return;
+    }
+
+    res.json({
+      quote: buildCryptoQuote({
+        totalAmount: release.price,
+        artistWallet: release.artist?.payoutWallet ?? "",
+        network: release.artist?.payoutNetwork ?? "",
+      }),
+      verification: getCryptoModuleConfig(),
+    });
+  }),
+);
 
 router.post(
   "/release/:releaseId",
@@ -77,17 +111,6 @@ router.post(
       return;
     }
 
-    if (
-      paymentMethod === "CRYPTO" &&
-      (!payload.txHash || !txHashRegex.test(payload.txHash))
-    ) {
-      res.status(400).json({
-        message:
-          "Valid blockchain transaction hash is required for crypto purchase confirmation.",
-      });
-      return;
-    }
-
     if (paymentMethod === "MANUAL" && !release.artist.payoutIban) {
       res.status(400).json({
         message: "Artist has not configured IBAN details yet.",
@@ -103,7 +126,36 @@ router.post(
       return;
     }
 
-    const status = paymentMethod === "CRYPTO" ? "PAID" : "UNDER_REVIEW";
+    const verification =
+      paymentMethod === "CRYPTO"
+        ? await verifyCryptoTransaction({
+            txHash: payload.txHash,
+            buyerWallet: payload.walletAddress,
+            artistWallet: release.artist.payoutWallet ?? "",
+          })
+        : null;
+    const cryptoConfig = getCryptoModuleConfig();
+
+    if (
+      paymentMethod === "CRYPTO" &&
+      cryptoConfig.verifyStrict &&
+      verification &&
+      !verification.verified
+    ) {
+      res.status(400).json({
+        message: verification.reason || "Crypto transaction could not be verified.",
+      });
+      return;
+    }
+
+    const status =
+      paymentMethod === "CRYPTO"
+        ? cryptoConfig.verifyOnchain
+          ? verification?.verified
+            ? "PAID"
+            : "UNDER_REVIEW"
+          : "PAID"
+        : "UNDER_REVIEW";
     const paymentReference =
       paymentMethod === "CRYPTO"
         ? payload.txHash
@@ -124,10 +176,13 @@ router.post(
         platformFee,
         artistPayout,
         paymentMethod,
-        cryptoTxHash: paymentMethod === "CRYPTO" ? paymentReference : undefined,
+        cryptoTxHash: paymentMethod === "CRYPTO" ? paymentReference ?? undefined : undefined,
         paymentNote:
           paymentMethod === "CRYPTO"
-            ? `Crypto payment confirmed on ${release.artist.payoutNetwork || "EVM"} network.`
+            ? verification?.verified
+              ? `Crypto payment verified on-chain (${release.artist.payoutNetwork || "EVM"}).`
+              : verification?.reason ||
+                `Crypto payment accepted (${release.artist.payoutNetwork || "EVM"}).`
             : `IBAN transfer reference: ${payload.ibanReference}`,
         buyerWallet: paymentMethod === "CRYPTO" ? payload.walletAddress : undefined,
         artistWallet: release.artist.payoutWallet ?? undefined,
@@ -144,7 +199,9 @@ router.post(
           entityType: "ORDER",
           action:
             paymentMethod === "CRYPTO"
-              ? "CRYPTO_ORDER_PAID"
+              ? status === "PAID"
+                ? "CRYPTO_ORDER_PAID"
+                : "CRYPTO_ORDER_UNDER_REVIEW"
               : "MANUAL_ORDER_CREATED",
           detailsJson: JSON.stringify({
             orderId: order.id,
@@ -161,7 +218,9 @@ router.post(
       order: serializeOrder(order),
       message:
         paymentMethod === "CRYPTO"
-          ? "Crypto payment confirmed. Download access is now active."
+          ? status === "PAID"
+            ? "Crypto payment confirmed. Download access is now active."
+            : "Crypto payment received. Download opens after verification."
           : "IBAN order received. Admin approval is required before download access.",
     });
   }),

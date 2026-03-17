@@ -61,6 +61,12 @@ export default function ReleasePage() {
     enabled: Boolean(release?.id),
   });
 
+  const cryptoQuoteQuery = useQuery({
+    queryKey: ["crypto-quote", release?.id],
+    queryFn: () => api.getCryptoQuote(release?.id ?? ""),
+    enabled: Boolean(release?.id && sessionUser && paymentMethod === "CRYPTO"),
+  });
+
   useEffect(() => {
     if (!release) return;
     setReleaseLikeCount(release.communityLikes ?? 0);
@@ -229,8 +235,12 @@ export default function ReleasePage() {
       return;
     }
 
-    if (paymentMethod === "CRYPTO" && txHash.trim().length < 10) {
-      alert("Paste the blockchain transaction hash to unlock instant download.");
+    if (
+      paymentMethod === "CRYPTO" &&
+      cryptoQuoteQuery.data?.quote.requiresTxHash &&
+      txHash.trim().length < 10
+    ) {
+      alert("On-chain verification requires a transaction hash.");
       return;
     }
 
@@ -384,6 +394,14 @@ export default function ReleasePage() {
                     0xc66aC8bcF729a6398bc879B7454B13983220601e
                   </span>
                 </p>
+                {cryptoQuoteQuery.data?.quote.splitContractAddress && (
+                  <p className="text-muted-foreground break-all">
+                    Split contract:{" "}
+                    <span className="text-foreground">
+                      {cryptoQuoteQuery.data.quote.splitContractAddress}
+                    </span>
+                  </p>
+                )}
                 {walletAddress ? (
                   <p className="text-foreground break-all">{walletAddress}</p>
                 ) : (
@@ -401,11 +419,19 @@ export default function ReleasePage() {
                 <input
                   value={txHash}
                   onChange={(event) => setTxHash(event.target.value)}
-                  placeholder="0x..."
+                  placeholder={
+                    cryptoQuoteQuery.data?.quote.requiresTxHash
+                      ? "Required for strict verification"
+                      : "Optional (recommended)"
+                  }
                   className="w-full px-2 py-2 bg-background razor-border text-foreground"
                 />
                 <p className="text-accent">
-                  Crypto purchases unlock download links instantly after valid tx hash.
+                  {cryptoQuoteQuery.data?.verification.verifyOnchain
+                    ? cryptoQuoteQuery.data.quote.requiresTxHash
+                      ? "Crypto order is verified on-chain. Tx hash is required."
+                      : "On-chain verification is enabled. Missing tx can fall back to review."
+                    : "Crypto purchases unlock download links instantly."}
                 </p>
               </div>
             )}

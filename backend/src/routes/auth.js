@@ -76,13 +76,47 @@ const buildFrontendBaseUrl = () =>
 const DEFAULT_GOOGLE_CLIENT_ID =
   "535808035791-333ln95k5jb6upmvsi99tmvflm0c11ue.apps.googleusercontent.com";
 
-const getGoogleConfig = () => {
+const getRequestBaseUrl = (req) => {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim();
+  const proto = forwardedProto || req.protocol || "https";
+  const host = String(req.headers["x-forwarded-host"] || req.get("host") || "").trim();
+  if (!host) {
+    return buildApiBaseUrl();
+  }
+  return `${proto}://${host}`.replace(/\/$/, "");
+};
+
+const pickRedirectUri = (req) => {
+  const explicit = process.env.GOOGLE_REDIRECT_URI?.trim();
+  if (explicit) return explicit;
+
+  const candidates = String(process.env.GOOGLE_REDIRECT_URI_LIST || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (candidates.length > 0) {
+    const requestHost = String(req?.headers?.host || "").toLowerCase();
+    const matched = candidates.find((candidate) => {
+      try {
+        return new URL(candidate).host.toLowerCase() === requestHost;
+      } catch {
+        return false;
+      }
+    });
+    return matched || candidates[0];
+  }
+
+  if (req) return `${getRequestBaseUrl(req)}/api/auth/google/callback`;
+  return `${buildApiBaseUrl()}/api/auth/google/callback`;
+};
+
+const getGoogleConfig = (req) => {
   const clientId =
     process.env.GOOGLE_CLIENT_ID?.trim() || DEFAULT_GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
-  const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI?.trim() ||
-    `${buildApiBaseUrl()}/api/auth/google/callback`;
+  const redirectUri = pickRedirectUri(req);
 
   if (!clientId) return null;
   return {
@@ -143,7 +177,7 @@ const redirectToLoginWithError = (res, message) => {
 router.get(
   "/google/start",
   asyncHandler(async (req, res) => {
-    const googleConfig = getGoogleConfig();
+    const googleConfig = getGoogleConfig(req);
     if (!googleConfig) {
       res
         .status(503)
@@ -181,7 +215,7 @@ router.get(
 router.get(
   "/google/callback",
   asyncHandler(async (req, res) => {
-    const googleConfig = getGoogleConfig();
+    const googleConfig = getGoogleConfig(req);
     if (!googleConfig) {
       redirectToLoginWithError(res, "Google authentication is not configured.");
       return;
@@ -284,6 +318,24 @@ router.get(
       provider: "google",
     });
     res.redirect(`${frontendBaseUrl}${appendQuery(returnTo, params)}`);
+  }),
+);
+
+router.get(
+  "/google/config",
+  asyncHandler(async (req, res) => {
+    const googleConfig = getGoogleConfig(req);
+    if (!googleConfig) {
+      res.status(503).json({ message: "Google authentication is not configured yet." });
+      return;
+    }
+    res.json({
+      clientId: googleConfig.clientId,
+      redirectUri: googleConfig.redirectUri,
+      frontendBaseUrl: buildFrontendBaseUrl(),
+      note:
+        "Add this redirectUri to Google Cloud Console > OAuth Client > Authorized redirect URIs.",
+    });
   }),
 );
 

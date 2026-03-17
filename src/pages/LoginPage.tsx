@@ -109,7 +109,17 @@ export default function LoginPage() {
         </p>
       )}
       {queryError && (
-        <p className="text-sm text-destructive mt-2">{queryError}</p>
+        <div className="text-sm text-destructive mt-2 space-y-1">
+          <p>{queryError}</p>
+          <a
+            href={`${apiBase}/api/auth/google/config`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs underline text-muted-foreground"
+          >
+            Google OAuth redirect config
+          </a>
+        </div>
       )}
 
       <p className="text-sm text-muted-foreground mt-6 text-center">

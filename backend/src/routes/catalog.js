@@ -142,7 +142,7 @@ router.get(
 router.get(
   "/releases/:slug",
   asyncHandler(async (req, res) => {
-    const release = await prisma.release.findUnique({
+    let release = await prisma.release.findUnique({
       where: { slug: req.params.slug },
       include: {
         ...releaseInclude,
@@ -155,6 +155,22 @@ router.get(
           : false,
       },
     });
+
+    if (!release) {
+      release = await prisma.release.findUnique({
+        where: { id: req.params.slug },
+        include: {
+          ...releaseInclude,
+          likes: req.user
+            ? {
+                where: { userId: req.user.id },
+                select: { userId: true },
+                take: 1,
+              }
+            : false,
+        },
+      });
+    }
 
     if (!release || !release.published || release.status !== "PUBLISHED") {
       res.status(404).json({ message: "Release not found" });
