@@ -97,7 +97,7 @@ export default function ReleasePage() {
   const currentTrackRef = useRef(currentTrack);
   const currentTimeRef = useRef(currentTime);
   const sessionUser = getSessionUser();
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MANUAL");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CRYPTO");
   const [walletAddress, setWalletAddress] = useState("");
   const [walletChainId, setWalletChainId] = useState("");
   const [ibanReference, setIbanReference] = useState("");
@@ -157,6 +157,7 @@ export default function ReleasePage() {
       txHash?: string;
       platformTxHash?: string;
       ibanReference?: string;
+      chainId?: string;
     }) => {
       const purchase = await api.purchaseRelease(payload.releaseId, {
         paymentMethod: payload.paymentMethod,
@@ -165,6 +166,7 @@ export default function ReleasePage() {
         platformTxHash:
           payload.paymentMethod === "CRYPTO" ? payload.platformTxHash : undefined,
         ibanReference: payload.ibanReference,
+        chainId: payload.chainId,
       });
       if (
         (purchase.order.status === "PAID" || purchase.order.status === "FULFILLED") &&
