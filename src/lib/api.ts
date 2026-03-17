@@ -13,6 +13,7 @@ import type {
   SearchResponse,
   StudioDashboardResponse,
   StudioReleaseUploadResponse,
+  TrackComment,
   Track,
 } from "@/types/music";
 
@@ -168,6 +169,18 @@ export const api = {
     request<CryptoQuoteResponse>(
       `/api/orders/release/${encodeURIComponent(releaseId)}/crypto-quote`,
     ),
+
+  addTrackComment: (
+    trackId: string,
+    payload: {
+      content: string;
+      timestamp?: number;
+    },
+  ) =>
+    request<TrackComment>(`/api/tracks/${encodeURIComponent(trackId)}/comments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   getMyOrders: () => request<Order[]>("/api/orders/my"),
 

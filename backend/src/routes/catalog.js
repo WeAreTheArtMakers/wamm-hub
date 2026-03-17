@@ -1,8 +1,10 @@
 import { Router } from "express";
+import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { authOptional, requireAuth } from "../lib/auth.js";
 import {
   serializeArtist,
+  serializeComment,
   serializeRelease,
   serializeTourDate,
   serializeTrack,
@@ -68,6 +70,17 @@ const asyncHandler =
       next(error);
     }
   };
+
+const commentPayloadSchema = z.object({
+  content: z.string().trim().min(1).max(280),
+  timestamp: z
+    .preprocess((value) => {
+      if (value === undefined || value === null || value === "") return undefined;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.floor(numeric) : undefined;
+    }, z.number().int().nonnegative().optional())
+    .optional(),
+});
 
 router.use(authOptional);
 
@@ -235,6 +248,77 @@ router.get(
       likedByMe: Array.isArray(release.likes) ? release.likes.length > 0 : false,
       totalLikes: release._count.likes,
     });
+  }),
+);
+
+router.post(
+  "/tracks/:trackId/comments",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = commentPayloadSchema.parse(req.body ?? {});
+
+    const track = await prisma.track.findUnique({
+      where: { id: req.params.trackId },
+      select: {
+        id: true,
+        duration: true,
+        isVisible: true,
+        release: {
+          select: {
+            published: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (
+      !track ||
+      !track.isVisible ||
+      !track.release ||
+      !track.release.published ||
+      track.release.status !== "PUBLISHED"
+    ) {
+      res.status(404).json({ message: "Track not found." });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        ownedArtist: {
+          select: { name: true },
+        },
+      },
+    });
+
+    if (!user) {
+      res.status(401).json({ message: "Authentication required." });
+      return;
+    }
+
+    const username =
+      user.ownedArtist?.name ||
+      user.email.split("@")[0]?.trim() ||
+      "Listener";
+    const timestamp = Math.max(
+      0,
+      Math.min(track.duration, payload.timestamp ?? 0),
+    );
+
+    const created = await prisma.trackComment.create({
+      data: {
+        id: `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        trackId: track.id,
+        userId: user.id,
+        username: username.slice(0, 64),
+        content: payload.content,
+        timestamp,
+        createdAt: new Date(),
+      },
+    });
+
+    res.status(201).json(serializeComment(created));
   }),
 );
 

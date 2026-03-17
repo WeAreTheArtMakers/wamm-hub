@@ -13,7 +13,14 @@ export default function RegisterPage() {
   const [role, setRole] = useState<"listener" | "artist">("listener");
   const [artistName, setArtistName] = useState("");
   const apiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
-  const googleAuthUrl = `${apiBase}/api/auth/google/start?returnTo=${encodeURIComponent("/auth/success")}`;
+  const googleParams = new URLSearchParams({
+    returnTo: "/auth/success",
+    role,
+  });
+  if (role === "artist" && artistName.trim()) {
+    googleParams.set("artistName", artistName.trim());
+  }
+  const googleAuthUrl = `${apiBase}/api/auth/google/start?${googleParams.toString()}`;
 
   const registerMutation = useMutation({
     mutationFn: api.register,

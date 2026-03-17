@@ -1,5 +1,5 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   Play,
@@ -28,6 +28,13 @@ const SPLIT_PAY_SELECTOR = "0xe433de36";
 type PaymentMethod = "MANUAL" | "CRYPTO";
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
+
+const formatCommentTime = (seconds: number) => {
+  const safe = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safe / 60);
+  const remaining = safe % 60;
+  return `${minutes}:${remaining.toString().padStart(2, "0")}`;
 };
 
 const toWeiHex = (amount: number) => {
@@ -83,7 +90,12 @@ const isWalletRejectedError = (error: unknown) =>
 
 export default function ReleasePage() {
   const { slug } = useParams<{ slug: string }>();
+  const queryClient = useQueryClient();
   const setTrack = usePlayer((state) => state.setTrack);
+  const currentTrack = usePlayer((state) => state.currentTrack);
+  const currentTime = usePlayer((state) => state.currentTime);
+  const currentTrackRef = useRef(currentTrack);
+  const currentTimeRef = useRef(currentTime);
   const sessionUser = getSessionUser();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MANUAL");
   const [walletAddress, setWalletAddress] = useState("");
@@ -94,6 +106,8 @@ export default function ReleasePage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [copyOk, setCopyOk] = useState(false);
   const [purchaseStatus, setPurchaseStatus] = useState<string>("");
+  const [commentText, setCommentText] = useState("");
+  const [commentTimestamp, setCommentTimestamp] = useState(0);
   const [downloadItems, setDownloadItems] = useState<
     Array<{ trackId: string; title: string; url: string; format: string }>
   >([]);
@@ -104,6 +118,11 @@ export default function ReleasePage() {
     enabled: Boolean(slug),
     retry: false,
   });
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+    currentTimeRef.current = currentTime;
+  }, [currentTrack, currentTime]);
 
   const likeStateQuery = useQuery({
     queryKey: ["release-like", release?.id],
@@ -190,6 +209,18 @@ export default function ReleasePage() {
     },
   });
 
+  const commentMutation = useMutation({
+    mutationFn: (payload: { trackId: string; content: string; timestamp: number }) =>
+      api.addTrackComment(payload.trackId, {
+        content: payload.content,
+        timestamp: payload.timestamp,
+      }),
+    onSuccess: async () => {
+      setCommentText("");
+      await queryClient.invalidateQueries({ queryKey: ["release", slug] });
+    },
+  });
+
   const artistPayment = release?.artistPayment ?? {
     iban: "",
     ibanName: "",
@@ -215,6 +246,19 @@ export default function ReleasePage() {
     const ids = (release.tracks ?? []).map((track) => track.id);
     setWaveTrackId((prev) => (prev && ids.includes(prev) ? prev : ids[0] ?? null));
   }, [release]);
+
+  useEffect(() => {
+    if (!release) return;
+    const tracks = release.tracks ?? [];
+    const selected =
+      tracks.find((track) => track.id === waveTrackId) || tracks[0] || null;
+    if (!selected) return;
+    const suggestion =
+      currentTrackRef.current?.id === selected.id
+        ? Math.floor(currentTimeRef.current)
+        : 0;
+    setCommentTimestamp(Math.max(0, Math.min(selected.duration, suggestion)));
+  }, [release, waveTrackId]);
 
   if (isLoading) {
     return (
@@ -251,6 +295,25 @@ export default function ReleasePage() {
     release.price > 0 && platformFee > 0 ? Math.round((platformFee / release.price) * 100) : 0;
   const waveformTrack =
     releaseTracks.find((track) => track.id === waveTrackId) || releaseTracks[0] || null;
+
+  const handleSubmitComment = () => {
+    if (!waveformTrack) return;
+    const content = commentText.trim();
+    if (!content) return;
+    if (!sessionUser) {
+      window.location.href = "/login";
+      return;
+    }
+    const timestamp = Math.max(
+      0,
+      Math.min(waveformTrack.duration, Math.floor(commentTimestamp)),
+    );
+    commentMutation.mutate({
+      trackId: waveformTrack.id,
+      content,
+      timestamp,
+    });
+  };
 
   const handlePlayAll = () => {
     if (releaseTracks.length === 0) return;
@@ -826,6 +889,66 @@ export default function ReleasePage() {
                   comments={waveformTrack.comments}
                   height={72}
                 />
+                <div className="mt-3 pt-3 border-t border-border/60 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>
+                      Comment at {formatCommentTime(commentTimestamp)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const current = currentTrack?.id === waveformTrack.id ? currentTime : 0;
+                        setCommentTimestamp(
+                          Math.max(0, Math.min(waveformTrack.duration, Math.floor(current))),
+                        );
+                      }}
+                      className="px-2 py-1 razor-border hover:text-foreground transition-colors"
+                    >
+                      Use Current Time
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(waveformTrack.duration, 1)}
+                      step={1}
+                      value={commentTimestamp}
+                      onChange={(event) => setCommentTimestamp(Number(event.target.value))}
+                      className="flex-1 accent-accent"
+                    />
+                    <span className="font-mono-data text-xs text-muted-foreground w-12 text-right">
+                      {formatCommentTime(commentTimestamp)}
+                    </span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      value={commentText}
+                      onChange={(event) => setCommentText(event.target.value)}
+                      maxLength={280}
+                      placeholder={
+                        sessionUser
+                          ? "Write a comment for this moment..."
+                          : "Sign in to add comments."
+                      }
+                      disabled={!sessionUser || commentMutation.isPending}
+                      className="flex-1 px-3 py-2 bg-secondary razor-border text-foreground text-sm focus:outline-none focus:border-accent transition-colors disabled:opacity-60"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSubmitComment}
+                      disabled={!sessionUser || commentMutation.isPending || !commentText.trim()}
+                      className="px-4 py-2 bg-foreground text-background font-mono-data hover:bg-accent hover:text-accent-foreground transition-colors press-effect disabled:opacity-60"
+                    >
+                      {commentMutation.isPending ? "Posting..." : "Post Comment"}
+                    </button>
+                  </div>
+                  {commentMutation.isError && (
+                    <p className="text-xs text-destructive">
+                      {commentMutation.error.message}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           )}

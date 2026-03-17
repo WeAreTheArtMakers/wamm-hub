@@ -134,6 +134,44 @@ const sanitizeReturnTo = (candidate) => {
   return candidate;
 };
 
+const parseSignupRole = (value) => (value === "artist" ? "artist" : "listener");
+
+const sanitizeArtistName = (value) => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.slice(0, 80);
+};
+
+const ensureArtistProfileForUser = async ({ userId, email, preferredName }) => {
+  const existingArtist = await prisma.artist.findFirst({
+    where: { ownerUserId: userId },
+  });
+  if (existingArtist) return existingArtist;
+
+  const requestedArtistName =
+    preferredName || humanizeSlug(email.split("@")[0] || "new-artist");
+  const existingSlugs = (
+    await prisma.artist.findMany({ select: { slug: true } })
+  ).map((entry) => entry.slug);
+  const uniqueSlug = buildUniqueSlug(requestedArtistName, (candidate) =>
+    existingSlugs.includes(candidate),
+  );
+
+  return prisma.artist.create({
+    data: {
+      name: requestedArtistName,
+      slug: uniqueSlug,
+      bio: `${requestedArtistName} artist profile on WAMM`,
+      location: "Independent",
+      ownerUserId: userId,
+      verified: false,
+      followers: 0,
+      monthlyListeners: 0,
+    },
+  });
+};
+
 const signState = (payload) => {
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = crypto
@@ -208,9 +246,14 @@ router.get(
     }
 
     const returnTo = sanitizeReturnTo(req.query.returnTo);
+    const signupRole = parseSignupRole(req.query.role);
+    const signupArtistName =
+      signupRole === "artist" ? sanitizeArtistName(req.query.artistName) : "";
     const pkce = googleConfig.usePkce ? createPkcePair() : null;
     const state = signState({
       returnTo,
+      signupRole,
+      signupArtistName,
       nonce: crypto.randomBytes(8).toString("hex"),
       iat: Date.now(),
       pkceVerifier: pkce?.verifier ?? null,
@@ -254,6 +297,8 @@ const googleCallbackHandler = asyncHandler(async (req, res) => {
     }
 
     const returnTo = sanitizeReturnTo(statePayload.returnTo);
+    const signupRole = parseSignupRole(statePayload.signupRole);
+    const signupArtistName = sanitizeArtistName(statePayload.signupArtistName);
 
     const tokenRequestBody = new URLSearchParams({
       code,
@@ -322,15 +367,39 @@ const googleCallbackHandler = asyncHandler(async (req, res) => {
       return;
     }
 
-    let user = await prisma.user.findUnique({ where: { email } });
+    let user = await prisma.user.findUnique({
+      where: { email },
+      include: { ownedArtist: true },
+    });
     if (!user) {
       const fallbackSecret = `${profile.sub ?? email}:${Date.now()}`;
       user = await prisma.user.create({
         data: {
           email,
           passwordHash: hashPassword(`google:${fallbackSecret}`),
-          role: "LISTENER",
+          role: signupRole === "artist" ? "ARTIST" : "LISTENER",
         },
+        include: { ownedArtist: true },
+      });
+    }
+
+    if (signupRole === "artist" && user.role !== "ARTIST") {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { role: "ARTIST" },
+        include: { ownedArtist: true },
+      });
+    }
+
+    if (signupRole === "artist") {
+      await ensureArtistProfileForUser({
+        userId: user.id,
+        email: user.email,
+        preferredName: signupArtistName,
+      });
+      user = await prisma.user.findUnique({
+        where: { id: user.id },
+        include: { ownedArtist: true },
       });
     }
 
