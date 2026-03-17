@@ -1,7 +1,8 @@
+import crypto from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth } from "../lib/auth.js";
+import { authOptional, requireAuth } from "../lib/auth.js";
 import { serializeOrder } from "../lib/serializers.js";
 import {
   buildCryptoQuote,
@@ -37,9 +38,43 @@ const asyncHandler =
     }
   };
 
+const hashPassword = (input) =>
+  crypto.createHash("sha256").update(input).digest("hex");
+
+const mapTrackToDownload = (track) => ({
+  trackId: track.id,
+  title: track.title,
+  url: track.highQualityUrl || track.originalUrl || track.audioUrl,
+  format: track.highQualityUrl ? "high.mp3" : track.originalUrl ? "original" : "preview",
+});
+
+const getOrCreateGuestBuyerUserId = async (walletAddress) => {
+  const normalizedWallet = String(walletAddress || "").trim().toLowerCase();
+  const email = `guest+${normalizedWallet}@wamm.local`;
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) return existing.id;
+
+  try {
+    const created = await prisma.user.create({
+      data: {
+        email,
+        passwordHash: hashPassword(`guest:${normalizedWallet}:${Date.now()}`),
+        role: "LISTENER",
+      },
+    });
+    return created.id;
+  } catch {
+    const fallback = await prisma.user.findUnique({ where: { email } });
+    if (!fallback) {
+      throw new Error("Failed to create guest buyer account.");
+    }
+    return fallback.id;
+  }
+};
+
 router.get(
   "/release/:releaseId/crypto-quote",
-  requireAuth,
+  authOptional,
   asyncHandler(async (req, res) => {
     const release = await prisma.release.findUnique({
       where: { id: req.params.releaseId },
@@ -71,7 +106,7 @@ router.get(
 
 router.post(
   "/release/:releaseId",
-  requireAuth,
+  authOptional,
   asyncHandler(async (req, res) => {
     const payload = purchaseSchema.parse(req.body ?? {});
     const paymentMethod = payload.paymentMethod;
@@ -87,6 +122,15 @@ router.post(
             payoutNetwork: true,
             payoutIban: true,
             payoutIbanName: true,
+          },
+        },
+        tracks: {
+          select: {
+            id: true,
+            title: true,
+            audioUrl: true,
+            highQualityUrl: true,
+            originalUrl: true,
           },
         },
       },
@@ -140,6 +184,13 @@ router.post(
       res.status(400).json({
         message:
           "Bank transfer reference is required. Your order will be confirmed after admin approval.",
+      });
+      return;
+    }
+
+    if (paymentMethod === "MANUAL" && !req.user?.id) {
+      res.status(401).json({
+        message: "Authentication required for IBAN payment orders.",
       });
       return;
     }
@@ -220,10 +271,20 @@ router.post(
           ? `iban:${payload.ibanReference}`
           : undefined;
 
+    const buyerUserId =
+      req.user?.id ??
+      (paymentMethod === "CRYPTO"
+        ? await getOrCreateGuestBuyerUserId(payload.walletAddress)
+        : null);
+    if (!buyerUserId) {
+      res.status(401).json({ message: "Authentication required." });
+      return;
+    }
+
     const order = await prisma.order.create({
       data: {
         id: `ord_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-        userId: req.user.id,
+        userId: buyerUserId,
         releaseId: release.id,
         trackId: null,
         releaseTitle: release.title,
@@ -258,7 +319,7 @@ router.post(
       await prisma.artistActivityLog.create({
         data: {
           artistId: release.artist.id,
-          actorUserId: req.user.id,
+          actorUserId: req.user?.id ?? buyerUserId,
           entityType: "ORDER",
           action:
             paymentMethod === "CRYPTO"
@@ -277,6 +338,11 @@ router.post(
       });
     }
 
+    const downloads =
+      status === "PAID" || status === "FULFILLED"
+        ? (release.tracks ?? []).map(mapTrackToDownload)
+        : [];
+
     res.status(201).json({
       order: serializeOrder(order),
       message:
@@ -285,6 +351,7 @@ router.post(
             ? "Crypto payment confirmed. Download access is now active."
             : "Crypto payment received. Download opens after verification."
           : "IBAN order received. Admin approval is required before download access.",
+      downloads,
     });
   }),
 );

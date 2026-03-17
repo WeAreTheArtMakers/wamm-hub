@@ -114,7 +114,7 @@ export default function ReleasePage() {
   const cryptoQuoteQuery = useQuery({
     queryKey: ["crypto-quote", release?.id],
     queryFn: () => api.getCryptoQuote(release?.id ?? ""),
-    enabled: Boolean(release?.id && sessionUser && paymentMethod === "CRYPTO"),
+    enabled: Boolean(release?.id && paymentMethod === "CRYPTO"),
   });
 
   useEffect(() => {
@@ -147,8 +147,20 @@ export default function ReleasePage() {
         ibanReference: payload.ibanReference,
       });
       if (
-        purchase.order.status === "PAID" ||
-        purchase.order.status === "FULFILLED"
+        (purchase.order.status === "PAID" || purchase.order.status === "FULFILLED") &&
+        Array.isArray(purchase.downloads) &&
+        purchase.downloads.length > 0
+      ) {
+        return {
+          downloads: purchase.downloads,
+          message: purchase.message,
+          status: purchase.order.status,
+        };
+      }
+
+      if (
+        (purchase.order.status === "PAID" || purchase.order.status === "FULFILLED") &&
+        sessionUser
       ) {
         const downloads = await api.getOrderDownloads(purchase.order.id);
         return {
@@ -357,7 +369,7 @@ export default function ReleasePage() {
   };
 
   const handleBuy = () => {
-    if (!sessionUser) {
+    if (!sessionUser && paymentMethod !== "CRYPTO") {
       window.location.href = "/login";
       return;
     }

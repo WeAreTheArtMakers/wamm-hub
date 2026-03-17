@@ -36,10 +36,11 @@ Constructor args:
 - `CRYPTO_VERIFY_ONCHAIN=true`
 - `CRYPTO_VERIFY_STRICT=true`
 - `CRYPTO_RPC_URL=<public rpc>`
+- `CRYPTO_SPLIT_ENABLED=true`
 - `CRYPTO_SPLIT_CONTRACT_ADDRESS=<deployed contract address>`
 - `CRYPTO_CHAIN_ID=<hex chain id like 0x1 or decimal string accepted by rpc response>`
 
-If `CRYPTO_SPLIT_CONTRACT_ADDRESS` is empty:
+If `CRYPTO_SPLIT_ENABLED=false` (or split contract empty):
 
 - Platform fee is `0%`
 - Crypto payment goes `100%` to artist wallet

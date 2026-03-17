@@ -181,6 +181,12 @@ export interface PurchasePayload {
 export interface ReleasePurchaseResponse {
   order: Order;
   message: string;
+  downloads?: Array<{
+    trackId: string;
+    title: string;
+    url: string;
+    format: string;
+  }>;
 }
 
 export interface OrderDownloadsResponse {

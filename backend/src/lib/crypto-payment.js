@@ -10,7 +10,10 @@ const rpcUrl = process.env.CRYPTO_RPC_URL?.trim() || "";
 const splitContractAddress =
   process.env.CRYPTO_SPLIT_CONTRACT_ADDRESS?.trim().toLowerCase() || "";
 const expectedChainId = process.env.CRYPTO_CHAIN_ID?.trim() || "";
-const splitEnabled = Boolean(splitContractAddress);
+const splitEnabledFromEnv =
+  String(process.env.CRYPTO_SPLIT_ENABLED ?? "false").toLowerCase() === "true";
+const splitEnabled = splitEnabledFromEnv && Boolean(splitContractAddress);
+const effectiveSplitContractAddress = splitEnabled ? splitContractAddress : "";
 const platformFeeRate = splitEnabled ? BASE_PLATFORM_FEE_RATE : 0;
 
 const txHashRegex = /^0x[a-fA-F0-9]{64}$/;
@@ -65,7 +68,7 @@ export const getCryptoModuleConfig = () => ({
   platformWallet,
   verifyOnchain,
   verifyStrict,
-  splitContractAddress,
+  splitContractAddress: effectiveSplitContractAddress,
   expectedChainId,
   splitEnabled,
 });
@@ -80,7 +83,7 @@ export const buildCryptoQuote = ({ totalAmount, artistWallet, network }) => {
     platformWallet,
     artistWallet: artistWallet || "",
     network: network || "",
-    splitContractAddress: splitContractAddress || "",
+    splitContractAddress: effectiveSplitContractAddress || "",
     requiresTxHash: verifyOnchain && verifyStrict,
   };
 };
@@ -160,7 +163,7 @@ export const verifyCryptoTransaction = async ({
       };
     }
 
-    const normalizedSplit = normalizeAddress(splitContractAddress);
+    const normalizedSplit = normalizeAddress(effectiveSplitContractAddress);
     const normalizedArtist = normalizeAddress(artistWallet);
     const txValueWei = (() => {
       try {
@@ -203,7 +206,7 @@ export const verifyCryptoTransaction = async ({
       };
     }
 
-    if (!splitContractAddress && artistWallet && to !== normalizeAddress(artistWallet)) {
+    if (!effectiveSplitContractAddress && artistWallet && to !== normalizeAddress(artistWallet)) {
       return {
         state: "wrong_receiver",
         verified: false,
