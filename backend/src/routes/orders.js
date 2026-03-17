@@ -13,11 +13,17 @@ const router = Router();
 const PLATFORM_FEE_RATE = getCryptoModuleConfig().platformFeeRate;
 const PLATFORM_WALLET_ADDRESS = getCryptoModuleConfig().platformWallet;
 
+const optionalTrimmedString = z.preprocess((value) => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}, z.string().optional());
+
 const purchaseSchema = z.object({
   paymentMethod: z.enum(["STRIPE", "CRYPTO", "MANUAL"]).default("MANUAL"),
-  walletAddress: z.string().trim().min(6).optional(),
-  txHash: z.string().trim().min(10).optional(),
-  ibanReference: z.string().trim().min(3).optional(),
+  walletAddress: optionalTrimmedString,
+  txHash: optionalTrimmedString,
+  ibanReference: optionalTrimmedString,
 });
 
 const asyncHandler =
@@ -107,6 +113,17 @@ router.post(
     if (paymentMethod === "CRYPTO" && !payload.walletAddress) {
       res.status(400).json({
         message: "Wallet connection is required for crypto purchases.",
+      });
+      return;
+    }
+
+    if (
+      paymentMethod === "CRYPTO" &&
+      payload.walletAddress &&
+      !/^0x[a-fA-F0-9]{40}$/.test(payload.walletAddress)
+    ) {
+      res.status(400).json({
+        message: "Connected wallet address is invalid.",
       });
       return;
     }

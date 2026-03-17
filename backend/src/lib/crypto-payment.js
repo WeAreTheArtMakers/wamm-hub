@@ -135,11 +135,31 @@ export const verifyCryptoTransaction = async ({
       };
     }
 
-    if (splitContractAddress && to !== normalizeAddress(splitContractAddress)) {
+    const normalizedSplit = normalizeAddress(splitContractAddress);
+    const normalizedArtist = normalizeAddress(artistWallet);
+
+    if (normalizedSplit) {
+      const sentToSplit = to === normalizedSplit;
+      const sentToArtist = normalizedArtist ? to === normalizedArtist : false;
+      if (!sentToSplit && !sentToArtist) {
+        return {
+          state: "wrong_receiver",
+          verified: false,
+          reason:
+            "Transaction receiver does not match split contract or artist wallet.",
+        };
+      }
+
       return {
-        state: "wrong_receiver",
-        verified: false,
-        reason: "Transaction was not sent to configured split contract.",
+        state: "verified",
+        verified: true,
+        reason: sentToSplit
+          ? "On-chain transaction verified via split contract."
+          : "On-chain transaction verified via artist wallet.",
+        from,
+        to,
+        valueWei: tx.value || "0x0",
+        blockNumber: receipt.blockNumber || null,
       };
     }
 
@@ -168,4 +188,3 @@ export const verifyCryptoTransaction = async ({
     };
   }
 };
-

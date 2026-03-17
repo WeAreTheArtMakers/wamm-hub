@@ -90,7 +90,10 @@ export default function ReleasePage() {
       const purchase = await api.purchaseRelease(payload.releaseId, {
         paymentMethod: payload.paymentMethod,
         walletAddress: payload.walletAddress,
-        txHash: payload.paymentMethod === "CRYPTO" ? txHash.trim() : undefined,
+        txHash:
+          payload.paymentMethod === "CRYPTO" && txHash.trim().length
+            ? txHash.trim()
+            : undefined,
         ibanReference: payload.ibanReference,
       });
       if (
