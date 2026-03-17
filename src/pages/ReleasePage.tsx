@@ -731,14 +731,15 @@ export default function ReleasePage() {
                     ? "Auto-split active: 97% artist / 3% platform in one payment."
                     : "Promo mode active: 100% of payment goes directly to artist wallet."}
                 </p>
-                {cryptoQuoteQuery.data && (
+                {cryptoQuoteQuery.data?.quote.priceSource === "binance" ? (
                   <p className="text-muted-foreground">
                     Live quote: {cryptoQuoteQuery.data.quote.totalAmountNative.toFixed(6)}{" "}
                     {cryptoQuoteQuery.data.quote.nativeTokenSymbol} ≈ $
-                    {release.price.toFixed(2)}
-                    {cryptoQuoteQuery.data.quote.priceSource === "binance"
-                      ? " (Binance spot)"
-                      : ""}
+                    {release.price.toFixed(2)} (Binance spot)
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">
+                    Connect wallet to fetch live chain quote (BNB/ETH/MATIC/AVAX).
                   </p>
                 )}
               </div>
