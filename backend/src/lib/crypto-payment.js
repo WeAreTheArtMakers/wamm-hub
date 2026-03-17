@@ -15,8 +15,11 @@ const splitEnabledFromEnv =
 const splitEnabled = splitEnabledFromEnv && Boolean(splitContractAddress);
 const effectiveSplitContractAddress = splitEnabled ? splitContractAddress : "";
 const platformFeeRate = splitEnabled ? BASE_PLATFORM_FEE_RATE : 0;
+const BINANCE_SPOT_TICKER_PRICE_URL = "https://api.binance.com/api/v3/ticker/price";
+const PRICE_CACHE_TTL_MS = 45_000;
 
 const txHashRegex = /^0x[a-fA-F0-9]{64}$/;
+const priceCache = new Map();
 
 const normalizeAddress = (value) =>
   String(value || "")
@@ -32,6 +35,79 @@ const normalizeChainIdValue = (value) => {
   } catch {
     return raw.toLowerCase();
   }
+};
+
+const getNetworkTokenSymbol = (network, chainId) => {
+  const normalizedChainId = normalizeChainIdValue(chainId);
+  if (normalizedChainId === "0x38" || normalizedChainId === "0x61") return "BNB";
+  if (
+    normalizedChainId === "0x1" ||
+    normalizedChainId === "0xaa36a7" ||
+    normalizedChainId === "0x5" ||
+    normalizedChainId === "0x2a" ||
+    normalizedChainId === "0xa4b1" ||
+    normalizedChainId === "0x66eee" ||
+    normalizedChainId === "0x2105" ||
+    normalizedChainId === "0x14a34"
+  ) {
+    return "ETH";
+  }
+  if (normalizedChainId === "0x89" || normalizedChainId === "0x13881") return "MATIC";
+  if (normalizedChainId === "0xa86a" || normalizedChainId === "0xa869") return "AVAX";
+
+  const networkText = String(network || "").toLowerCase();
+  if (networkText.includes("bnb") || networkText.includes("bsc") || networkText.includes("binance")) {
+    return "BNB";
+  }
+  if (networkText.includes("base") || networkText.includes("eth") || networkText.includes("ethereum")) {
+    return "ETH";
+  }
+  if (networkText.includes("polygon") || networkText.includes("matic") || networkText.includes("pol")) {
+    return "MATIC";
+  }
+  if (networkText.includes("avax") || networkText.includes("avalanche")) {
+    return "AVAX";
+  }
+  return "";
+};
+
+const getBinanceTickerSymbol = (tokenSymbol) => {
+  if (tokenSymbol === "BNB") return "BNBUSDT";
+  if (tokenSymbol === "ETH") return "ETHUSDT";
+  if (tokenSymbol === "MATIC") return "MATICUSDT";
+  if (tokenSymbol === "AVAX") return "AVAXUSDT";
+  return "";
+};
+
+const toRoundedTokenAmount = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return Number(numeric.toFixed(8));
+};
+
+const fetchUsdPriceFromBinance = async (tickerSymbol) => {
+  if (!tickerSymbol) return null;
+  const now = Date.now();
+  const cached = priceCache.get(tickerSymbol);
+  if (cached && now - cached.timestamp < PRICE_CACHE_TTL_MS) {
+    return cached.price;
+  }
+
+  const response = await fetch(
+    `${BINANCE_SPOT_TICKER_PRICE_URL}?symbol=${encodeURIComponent(tickerSymbol)}`,
+  );
+  if (!response.ok) {
+    throw new Error(`Binance price API failed with status ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const price = Number(payload?.price);
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error("Binance price API returned invalid price.");
+  }
+
+  priceCache.set(tickerSymbol, { price, timestamp: now });
+  return price;
 };
 
 const amountToWeiBigInt = (amount) => {
@@ -73,18 +149,57 @@ export const getCryptoModuleConfig = () => ({
   splitEnabled,
 });
 
-export const buildCryptoQuote = ({ totalAmount, artistWallet, network }) => {
+export const buildCryptoQuote = async ({
+  totalAmount,
+  artistWallet,
+  network,
+  chainId,
+}) => {
   const platformFee = Number((totalAmount * platformFeeRate).toFixed(2));
   const artistPayout = Number((totalAmount - platformFee).toFixed(2));
+  const tokenSymbol = getNetworkTokenSymbol(network, chainId);
+  const tickerSymbol = getBinanceTickerSymbol(tokenSymbol);
+
+  let usdPerToken = null;
+  let priceSource = "none";
+  if (tickerSymbol) {
+    try {
+      usdPerToken = await fetchUsdPriceFromBinance(tickerSymbol);
+      priceSource = "binance";
+    } catch (error) {
+      console.error(
+        `[crypto-quote] failed to fetch ${tickerSymbol} price from Binance:`,
+        error?.message || error,
+      );
+    }
+  }
+
+  const totalAmountNative = usdPerToken
+    ? toRoundedTokenAmount(totalAmount / usdPerToken)
+    : toRoundedTokenAmount(totalAmount);
+  const platformFeeNative = usdPerToken
+    ? toRoundedTokenAmount(platformFee / usdPerToken)
+    : toRoundedTokenAmount(platformFee);
+  const artistPayoutNative = usdPerToken
+    ? toRoundedTokenAmount(artistPayout / usdPerToken)
+    : toRoundedTokenAmount(artistPayout);
+
   return {
     totalAmount: Number(totalAmount),
     platformFee,
     artistPayout,
+    totalAmountNative,
+    platformFeeNative,
+    artistPayoutNative,
+    nativeTokenSymbol: tokenSymbol || "NATIVE",
+    usdPerToken,
+    priceSource,
     platformWallet,
     artistWallet: artistWallet || "",
     network: network || "",
     splitContractAddress: effectiveSplitContractAddress || "",
     requiresTxHash: verifyOnchain && verifyStrict,
+    quotedAt: new Date().toISOString(),
   };
 };
 

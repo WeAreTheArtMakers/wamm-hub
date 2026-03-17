@@ -176,6 +176,7 @@ export interface PurchasePayload {
   txHash?: string;
   platformTxHash?: string;
   ibanReference?: string;
+  chainId?: string;
 }
 
 export interface ReleasePurchaseResponse {
@@ -204,11 +205,18 @@ export interface CryptoQuoteResponse {
     totalAmount: number;
     platformFee: number;
     artistPayout: number;
+    totalAmountNative: number;
+    platformFeeNative: number;
+    artistPayoutNative: number;
+    nativeTokenSymbol: string;
+    usdPerToken: number | null;
+    priceSource: string;
     platformWallet: string;
     artistWallet: string;
     network: string;
     splitContractAddress: string;
     requiresTxHash: boolean;
+    quotedAt: string;
   };
   verification: {
     platformFeeRate: number;

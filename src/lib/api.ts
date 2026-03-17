@@ -138,6 +138,7 @@ export const api = {
       txHash?: string;
       platformTxHash?: string;
       ibanReference?: string;
+      chainId?: string;
     } = {},
   ) =>
     request<ReleasePurchaseResponse>(
@@ -150,6 +151,7 @@ export const api = {
           txHash: payload.txHash,
           platformTxHash: payload.platformTxHash,
           ibanReference: payload.ibanReference,
+          chainId: payload.chainId,
         }),
       },
     ),
@@ -165,10 +167,18 @@ export const api = {
       { method: "POST" },
     ),
 
-  getCryptoQuote: (releaseId: string) =>
-    request<CryptoQuoteResponse>(
-      `/api/orders/release/${encodeURIComponent(releaseId)}/crypto-quote`,
-    ),
+  getCryptoQuote: (releaseId: string, chainId?: string) => {
+    const params = new URLSearchParams();
+    if (chainId?.trim()) {
+      params.set("chainId", chainId.trim());
+    }
+    const query = params.toString();
+    return request<CryptoQuoteResponse>(
+      `/api/orders/release/${encodeURIComponent(releaseId)}/crypto-quote${
+        query ? `?${query}` : ""
+      }`,
+    );
+  },
 
   addTrackComment: (
     trackId: string,

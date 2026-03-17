@@ -99,6 +99,7 @@ export default function ReleasePage() {
   const sessionUser = getSessionUser();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MANUAL");
   const [walletAddress, setWalletAddress] = useState("");
+  const [walletChainId, setWalletChainId] = useState("");
   const [ibanReference, setIbanReference] = useState("");
   const [waveTrackId, setWaveTrackId] = useState<string | null>(null);
   const [likedByMe, setLikedByMe] = useState(false);
@@ -131,8 +132,8 @@ export default function ReleasePage() {
   });
 
   const cryptoQuoteQuery = useQuery({
-    queryKey: ["crypto-quote", release?.id],
-    queryFn: () => api.getCryptoQuote(release?.id ?? ""),
+    queryKey: ["crypto-quote", release?.id, walletChainId || "default"],
+    queryFn: () => api.getCryptoQuote(release?.id ?? "", walletChainId || undefined),
     enabled: Boolean(release?.id && paymentMethod === "CRYPTO"),
   });
 
@@ -342,6 +343,10 @@ export default function ReleasePage() {
       });
       if (Array.isArray(accounts) && typeof accounts[0] === "string") {
         setWalletAddress(accounts[0]);
+        const activeChain = await provider.request({ method: "eth_chainId" });
+        if (typeof activeChain === "string") {
+          setWalletChainId(normalizeChainIdToHex(activeChain));
+        }
         return accounts[0];
       }
       return null;
@@ -457,8 +462,6 @@ export default function ReleasePage() {
       void (async () => {
         try {
           setPurchaseStatus("Preparing crypto payment...");
-          const quotePayload =
-            cryptoQuoteQuery.data ?? (await api.getCryptoQuote(release.id));
           let activeWallet = walletAddress;
           if (!activeWallet) {
             const connectedWallet = await connectWallet();
@@ -468,21 +471,35 @@ export default function ReleasePage() {
             }
             activeWallet = connectedWallet;
           }
+
+          const currentBeforeSwitch = await provider.request({ method: "eth_chainId" });
+          let activeChainId =
+            typeof currentBeforeSwitch === "string"
+              ? normalizeChainIdToHex(currentBeforeSwitch)
+              : "";
+
+          const preflightQuote =
+            cryptoQuoteQuery.data ??
+            (await api.getCryptoQuote(release.id, activeChainId || undefined));
           const expectedChainId = normalizeChainIdToHex(
-            quotePayload.verification.expectedChainId || "",
+            (preflightQuote.verification.expectedChainId || "").trim(),
           );
 
           if (expectedChainId) {
-            const current = await provider.request({ method: "eth_chainId" });
-            const currentChainId =
-              typeof current === "string" ? normalizeChainIdToHex(current) : "";
-            if (currentChainId && currentChainId !== expectedChainId) {
+            if (activeChainId && activeChainId !== expectedChainId) {
               await provider.request({
                 method: "wallet_switchEthereumChain",
                 params: [{ chainId: expectedChainId }],
               });
+              activeChainId = expectedChainId;
             }
           }
+          setWalletChainId(activeChainId);
+
+          const quotePayload =
+            expectedChainId && activeChainId === expectedChainId
+              ? await api.getCryptoQuote(release.id, activeChainId || undefined)
+              : preflightQuote;
 
           let artistHash = "";
           let platformHash: string | undefined;
@@ -497,7 +514,7 @@ export default function ReleasePage() {
                 provider,
                 from: activeWallet,
                 splitContract: splitTarget,
-                totalAmount: quotePayload.quote.totalAmount,
+                totalAmount: quotePayload.quote.totalAmountNative,
                 artistWalletAddress: artistPayment.wallet,
                 releaseRef: release.id,
               });
@@ -510,14 +527,14 @@ export default function ReleasePage() {
                 provider,
                 activeWallet,
                 artistPayment.wallet,
-                quotePayload.quote.artistPayout,
+                quotePayload.quote.artistPayoutNative,
               );
-              if (quotePayload.quote.platformFee > 0) {
+              if (quotePayload.quote.platformFeeNative > 0) {
                 platformHash = await sendNativeTransfer(
                   provider,
                   activeWallet,
                   quotePayload.verification.platformWallet,
-                  quotePayload.quote.platformFee,
+                  quotePayload.quote.platformFeeNative,
                 );
               }
             }
@@ -527,16 +544,16 @@ export default function ReleasePage() {
               provider,
               activeWallet,
               artistPayment.wallet,
-              quotePayload.quote.artistPayout,
+              quotePayload.quote.artistPayoutNative,
             );
 
-            if (quotePayload.quote.platformFee > 0) {
+            if (quotePayload.quote.platformFeeNative > 0) {
               setPurchaseStatus("Please approve platform fee transaction in wallet...");
               platformHash = await sendNativeTransfer(
                 provider,
                 activeWallet,
                 quotePayload.verification.platformWallet,
-                quotePayload.quote.platformFee,
+                quotePayload.quote.platformFeeNative,
               );
             }
           }
@@ -548,6 +565,7 @@ export default function ReleasePage() {
             txHash: artistHash,
             platformTxHash: platformHash,
             ibanReference: undefined,
+            chainId: activeChainId || undefined,
           });
         } catch (error) {
           setPurchaseStatus("");
@@ -713,6 +731,16 @@ export default function ReleasePage() {
                     ? "Auto-split active: 97% artist / 3% platform in one payment."
                     : "Promo mode active: 100% of payment goes directly to artist wallet."}
                 </p>
+                {cryptoQuoteQuery.data && (
+                  <p className="text-muted-foreground">
+                    Live quote: {cryptoQuoteQuery.data.quote.totalAmountNative.toFixed(6)}{" "}
+                    {cryptoQuoteQuery.data.quote.nativeTokenSymbol} ≈ $
+                    {release.price.toFixed(2)}
+                    {cryptoQuoteQuery.data.quote.priceSource === "binance"
+                      ? " (Binance spot)"
+                      : ""}
+                  </p>
+                )}
               </div>
             )}
 

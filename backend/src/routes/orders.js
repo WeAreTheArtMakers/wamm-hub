@@ -26,6 +26,7 @@ const purchaseSchema = z.object({
   txHash: optionalTrimmedString,
   platformTxHash: optionalTrimmedString,
   ibanReference: optionalTrimmedString,
+  chainId: optionalTrimmedString,
 });
 
 const asyncHandler =
@@ -94,10 +95,11 @@ router.get(
     }
 
     res.json({
-      quote: buildCryptoQuote({
+      quote: await buildCryptoQuote({
         totalAmount: release.price,
         artistWallet: release.artist?.payoutWallet ?? "",
         network: release.artist?.payoutNetwork ?? "",
+        chainId: req.query.chainId,
       }),
       verification: getCryptoModuleConfig(),
     });
@@ -195,9 +197,26 @@ router.post(
       return;
     }
 
+    const cryptoQuote =
+      paymentMethod === "CRYPTO"
+        ? await buildCryptoQuote({
+            totalAmount: release.price,
+            artistWallet: release.artist?.payoutWallet ?? "",
+            network: release.artist?.payoutNetwork ?? "",
+            chainId: payload.chainId,
+          })
+        : null;
+
     const cryptoConfig = getCryptoModuleConfig();
     const hasSplitRouter = Boolean((cryptoConfig.splitContractAddress || "").trim());
-    const expectedPrimaryAmount = hasSplitRouter ? release.price : artistPayout;
+    const expectedPrimaryAmount =
+      paymentMethod === "CRYPTO" && cryptoQuote
+        ? hasSplitRouter
+          ? cryptoQuote.totalAmountNative
+          : cryptoQuote.artistPayoutNative
+        : hasSplitRouter
+          ? release.price
+          : artistPayout;
     const verification =
       paymentMethod === "CRYPTO"
         ? await verifyCryptoTransaction({
@@ -226,7 +245,10 @@ router.post(
             txHash: payload.platformTxHash,
             buyerWallet: payload.walletAddress,
             artistWallet: PLATFORM_WALLET_ADDRESS,
-            expectedAmount: platformFee,
+            expectedAmount:
+              paymentMethod === "CRYPTO" && cryptoQuote
+                ? cryptoQuote.platformFeeNative
+                : platformFee,
           })
         : null;
 
