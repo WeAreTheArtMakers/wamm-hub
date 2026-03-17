@@ -144,21 +144,23 @@ router.post(
       return;
     }
 
+    const cryptoConfig = getCryptoModuleConfig();
+    const hasSplitRouter = Boolean((cryptoConfig.splitContractAddress || "").trim());
+    const expectedPrimaryAmount = hasSplitRouter ? release.price : artistPayout;
     const verification =
       paymentMethod === "CRYPTO"
         ? await verifyCryptoTransaction({
             txHash: payload.txHash,
             buyerWallet: payload.walletAddress,
             artistWallet: release.artist.payoutWallet ?? "",
-            expectedAmount: artistPayout,
+            expectedAmount: expectedPrimaryAmount,
           })
         : null;
-    const cryptoConfig = getCryptoModuleConfig();
     const requiresPlatformFeeTx =
       paymentMethod === "CRYPTO" &&
       cryptoConfig.verifyOnchain &&
       cryptoConfig.verifyStrict &&
-      !(getCryptoModuleConfig().splitContractAddress || "").trim();
+      !hasSplitRouter;
     if (requiresPlatformFeeTx && !payload.platformTxHash) {
       res.status(400).json({
         message:
@@ -235,11 +237,13 @@ router.post(
         paymentNote:
           paymentMethod === "CRYPTO"
             ? verification?.verified
-              ? `Crypto payment verified on-chain (${release.artist.payoutNetwork || "EVM"}).${
-                  payload.platformTxHash
-                    ? ` Platform fee tx: ${payload.platformTxHash}.`
-                    : ""
-                }`
+              ? hasSplitRouter
+                ? `Crypto payment verified on-chain via split routing (${release.artist.payoutNetwork || "EVM"}).`
+                : `Crypto payment verified on-chain (${release.artist.payoutNetwork || "EVM"}).${
+                    payload.platformTxHash
+                      ? ` Platform fee tx: ${payload.platformTxHash}.`
+                      : ""
+                  }`
               : verification?.reason ||
                 `Crypto payment accepted (${release.artist.payoutNetwork || "EVM"}).`
             : `IBAN transfer reference: ${payload.ibanReference}`,

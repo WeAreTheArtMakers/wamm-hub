@@ -25,6 +25,7 @@ import { formatDuration, formatNumber, trackToPlayerTrack } from "@/lib/music";
 import { usePlayer } from "@/store/usePlayer";
 
 const PLATFORM_FEE_RATE = 0.03;
+const SPLIT_PAY_SELECTOR = "0xe433de36";
 
 type PaymentMethod = "MANUAL" | "CRYPTO";
 type EthereumProvider = {
@@ -50,14 +51,44 @@ const normalizeChainIdToHex = (chainId: string) => {
   }
 };
 
+const toBytes32Hex = (input: string) => {
+  const bytes = new TextEncoder().encode(input || "");
+  const limited = bytes.slice(0, 32);
+  const hex = Array.from(limited)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+  return `0x${hex.padEnd(64, "0")}`;
+};
+
+const padAddressToWord = (address: string) => {
+  const normalized = String(address || "")
+    .trim()
+    .replace(/^0x/i, "")
+    .toLowerCase();
+  if (!/^[a-f0-9]{40}$/.test(normalized)) {
+    throw new Error("Artist wallet address is invalid.");
+  }
+  return normalized.padStart(64, "0");
+};
+
+const shortenWallet = (address: string) => {
+  const value = String(address || "").trim();
+  if (value.length <= 12) return value;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+};
+
+const isWalletRejectedError = (error: unknown) =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  Number((error as { code?: unknown }).code) === 4001;
+
 export default function ReleasePage() {
   const { slug } = useParams<{ slug: string }>();
   const setTrack = usePlayer((state) => state.setTrack);
   const sessionUser = getSessionUser();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MANUAL");
   const [walletAddress, setWalletAddress] = useState("");
-  const [txHash, setTxHash] = useState("");
-  const [platformTxHash, setPlatformTxHash] = useState("");
   const [ibanReference, setIbanReference] = useState("");
   const [waveTrackId, setWaveTrackId] = useState<string | null>(null);
   const [likedByMe, setLikedByMe] = useState(false);
@@ -221,11 +252,11 @@ export default function ReleasePage() {
     );
   };
 
-  const connectWallet = async () => {
+  const connectWallet = async (): Promise<string | null> => {
     const provider = (window as unknown as { ethereum?: EthereumProvider }).ethereum;
     if (!provider) {
       alert("No wallet detected. Install MetaMask or another EVM wallet.");
-      return;
+      return null;
     }
     try {
       const accounts = await provider.request({
@@ -233,9 +264,12 @@ export default function ReleasePage() {
       });
       if (Array.isArray(accounts) && typeof accounts[0] === "string") {
         setWalletAddress(accounts[0]);
+        return accounts[0];
       }
+      return null;
     } catch {
       alert("Wallet connection request was rejected.");
+      return null;
     }
   };
 
@@ -282,6 +316,43 @@ export default function ReleasePage() {
     return tx;
   };
 
+  const sendSplitContractPayment = async ({
+    provider,
+    from,
+    splitContract,
+    totalAmount,
+    artistWalletAddress,
+    releaseRef,
+  }: {
+    provider: EthereumProvider;
+    from: string;
+    splitContract: string;
+    totalAmount: number;
+    artistWalletAddress: string;
+    releaseRef: string;
+  }) => {
+    const value = toWeiHex(totalAmount);
+    const data = `${SPLIT_PAY_SELECTOR}${padAddressToWord(artistWalletAddress)}${toBytes32Hex(
+      releaseRef,
+    ).slice(2)}`;
+    const tx = await provider.request({
+      method: "eth_sendTransaction",
+      params: [
+        {
+          from,
+          to: splitContract,
+          value,
+          data,
+        },
+      ],
+    });
+    if (typeof tx !== "string") {
+      throw new Error("Wallet did not return a valid split transaction hash.");
+    }
+    await waitForReceipt(provider, tx);
+    return tx;
+  };
+
   const handleBuy = () => {
     if (!sessionUser) {
       window.location.href = "/login";
@@ -298,11 +369,6 @@ export default function ReleasePage() {
       return;
     }
 
-    if (paymentMethod === "CRYPTO" && !walletAddress) {
-      void connectWallet();
-      return;
-    }
-
     if (paymentMethod === "CRYPTO") {
       const provider = (window as unknown as { ethereum?: EthereumProvider }).ethereum;
       if (!provider) {
@@ -315,6 +381,15 @@ export default function ReleasePage() {
           setPurchaseStatus("Preparing crypto payment...");
           const quotePayload =
             cryptoQuoteQuery.data ?? (await api.getCryptoQuote(release.id));
+          let activeWallet = walletAddress;
+          if (!activeWallet) {
+            const connectedWallet = await connectWallet();
+            if (!connectedWallet) {
+              setPurchaseStatus("");
+              return;
+            }
+            activeWallet = connectedWallet;
+          }
           const expectedChainId = normalizeChainIdToHex(
             quotePayload.verification.expectedChainId || "",
           );
@@ -331,28 +406,65 @@ export default function ReleasePage() {
             }
           }
 
-          setPurchaseStatus("Please approve artist payout transaction in wallet...");
-          const artistHash = await sendNativeTransfer(
-            provider,
-            walletAddress,
-            artistPayment.wallet,
-            quotePayload.quote.artistPayout,
-          );
-          setTxHash(artistHash);
+          let artistHash = "";
+          let platformHash: string | undefined;
+          const splitTarget = quotePayload.quote.splitContractAddress?.trim() || "";
 
-          setPurchaseStatus("Please approve platform fee transaction in wallet...");
-          const platformHash = await sendNativeTransfer(
-            provider,
-            walletAddress,
-            quotePayload.verification.platformWallet,
-            quotePayload.quote.platformFee,
-          );
-          setPlatformTxHash(platformHash);
+          if (splitTarget) {
+            try {
+              setPurchaseStatus(
+                "Approve one crypto payment in wallet. Split is handled automatically.",
+              );
+              artistHash = await sendSplitContractPayment({
+                provider,
+                from: activeWallet,
+                splitContract: splitTarget,
+                totalAmount: quotePayload.quote.totalAmount,
+                artistWalletAddress: artistPayment.wallet,
+                releaseRef: release.id,
+              });
+            } catch (splitError) {
+              if (isWalletRejectedError(splitError)) {
+                throw splitError;
+              }
+              setPurchaseStatus(
+                "Split router not available. Please approve artist payout and platform fee transfers.",
+              );
+              artistHash = await sendNativeTransfer(
+                provider,
+                activeWallet,
+                artistPayment.wallet,
+                quotePayload.quote.artistPayout,
+              );
+              platformHash = await sendNativeTransfer(
+                provider,
+                activeWallet,
+                quotePayload.verification.platformWallet,
+                quotePayload.quote.platformFee,
+              );
+            }
+          } else {
+            setPurchaseStatus("Please approve artist payout transaction in wallet...");
+            artistHash = await sendNativeTransfer(
+              provider,
+              activeWallet,
+              artistPayment.wallet,
+              quotePayload.quote.artistPayout,
+            );
+
+            setPurchaseStatus("Please approve platform fee transaction in wallet...");
+            platformHash = await sendNativeTransfer(
+              provider,
+              activeWallet,
+              quotePayload.verification.platformWallet,
+              quotePayload.quote.platformFee,
+            );
+          }
 
           purchaseMutation.mutate({
             releaseId: release.id,
             paymentMethod,
-            walletAddress,
+            walletAddress: activeWallet,
             txHash: artistHash,
             platformTxHash: platformHash,
             ibanReference: undefined,
@@ -501,67 +613,26 @@ export default function ReleasePage() {
             ) : (
               <div className="space-y-2 text-xs bg-secondary/60 p-3 razor-border">
                 <p className="text-muted-foreground">
-                  Connect wallet to continue with crypto payment.
+                  Connect wallet and pay once. WAMM automatically routes the payment
+                  (97% artist / 3% platform).
                 </p>
-                <p className="text-muted-foreground break-all">
-                  Artist wallet:{" "}
-                  <span className="text-foreground">
-                    {artistPayment.wallet || "Not configured"}
-                  </span>
-                </p>
-                <p className="text-muted-foreground">
-                  Network:{" "}
-                  <span className="text-foreground">
-                    {artistPayment.network || "EVM compatible"}
-                  </span>
-                </p>
-                <p className="text-muted-foreground">
-                  Platform wallet (fee 3%):{" "}
-                  <span className="text-foreground break-all">
-                    0xc66aC8bcF729a6398bc879B7454B13983220601e
-                  </span>
-                </p>
-                {cryptoQuoteQuery.data?.quote.splitContractAddress && (
-                  <p className="text-muted-foreground break-all">
-                    Split contract:{" "}
-                    <span className="text-foreground">
-                      {cryptoQuoteQuery.data.quote.splitContractAddress}
-                    </span>
-                  </p>
-                )}
                 {walletAddress ? (
-                  <p className="text-foreground break-all">{walletAddress}</p>
+                  <p className="text-foreground">Connected: {shortenWallet(walletAddress)}</p>
                 ) : (
                   <button
                     type="button"
-                    onClick={connectWallet}
+                    onClick={() => {
+                      void connectWallet();
+                    }}
                     className="w-full py-2 razor-border font-mono-data text-muted-foreground hover:text-foreground transition-colors"
                   >
                     Connect Wallet
                   </button>
                 )}
-                <label className="block text-muted-foreground font-mono-data pt-1">
-                  Artist Payout Tx Hash
-                </label>
-                <input
-                  value={txHash}
-                  onChange={(event) => setTxHash(event.target.value)}
-                  placeholder="Auto-filled after wallet payment"
-                  className="w-full px-2 py-2 bg-background razor-border text-foreground"
-                />
-                <label className="block text-muted-foreground font-mono-data pt-1">
-                  Platform Fee Tx Hash
-                </label>
-                <input
-                  value={platformTxHash}
-                  onChange={(event) => setPlatformTxHash(event.target.value)}
-                  placeholder="Auto-filled after wallet payment"
-                  className="w-full px-2 py-2 bg-background razor-border text-foreground"
-                />
                 <p className="text-accent">
-                  {cryptoQuoteQuery.data?.verification.verifyOnchain
-                    ? "Wallet sends artist payout + platform fee on-chain, then order is verified automatically."
-                    : "Crypto purchases unlock download links instantly."}
+                  {cryptoQuoteQuery.data?.quote.splitContractAddress
+                    ? "Single approval flow is active for this release."
+                    : "If split routing is unavailable, wallet may ask for a second confirmation."}
                 </p>
               </div>
             )}
