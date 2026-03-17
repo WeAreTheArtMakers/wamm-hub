@@ -257,6 +257,30 @@ export const api = {
     });
   },
 
+  addStudioTracksToRelease: (payload: {
+    releaseId: string;
+    tracks: File[];
+    trackPrice?: number;
+    genre?: string;
+    currency?: string;
+  }) => {
+    const formData = new FormData();
+    payload.tracks.forEach((file) => formData.append("tracks", file));
+    if (typeof payload.trackPrice === "number") {
+      formData.append("trackPrice", String(payload.trackPrice));
+    }
+    if (payload.genre) formData.append("genre", payload.genre);
+    if (payload.currency) formData.append("currency", payload.currency);
+
+    return request<StudioReleaseUploadResponse>(
+      `/api/studio/releases/${encodeURIComponent(payload.releaseId)}/tracks`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+  },
+
   publishStudioRelease: (releaseId: string) =>
     request<{ message: string; release: Release }>(
       `/api/studio/releases/${encodeURIComponent(releaseId)}/publish`,

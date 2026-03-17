@@ -385,6 +385,139 @@ const getUniqueReleaseSlug = async (baseSlug) => {
   return candidate;
 };
 
+const ensureGenreLinkedToArtist = async (artistId, rawGenre) => {
+  const genreName = safeText(rawGenre, 80) || "Electronic";
+  const genre = await prisma.genre.upsert({
+    where: { name: genreName },
+    update: {},
+    create: { name: genreName },
+  });
+
+  await prisma.artistGenre.upsert({
+    where: { artistId_genreId: { artistId, genreId: genre.id } },
+    update: {},
+    create: { artistId, genreId: genre.id },
+  });
+
+  return genre;
+};
+
+const createTrackFromUpload = async ({
+  artist,
+  releaseId,
+  releaseSlug,
+  releaseCoverUrl,
+  file,
+  indexSeed,
+  fallbackGenre,
+  trackPrice,
+  currency,
+  commenterProfiles,
+}) => {
+  const sourceExt = path.extname(file.originalname).toLowerCase() || ".mp3";
+  const trackBaseName = path.basename(file.originalname, sourceExt);
+  const trackSlug = slugify(trackBaseName || `track-${indexSeed + 1}`);
+  const trackTitle = humanizeSlug(trackBaseName || `track-${indexSeed + 1}`);
+  const trackDir = path.join(
+    studioStorageRoot,
+    artist.slug,
+    "releases",
+    releaseSlug,
+    "tracks",
+    trackSlug,
+  );
+  await ensureDirectory(trackDir);
+
+  const originalFileName = `original${sourceExt}`;
+  const originalPath = path.join(trackDir, originalFileName);
+  await moveFile(file.path, originalPath);
+
+  const metadata = await parseTrackMetadata(originalPath);
+  let trackCoverUrl = releaseCoverUrl || "";
+
+  const streamUrl = await uploadToRemoteWithFallback({
+    localFilePath: originalPath,
+    localUrl: toMediaUrl(originalPath),
+    artistSlug: artist.slug,
+    releaseSlug,
+    trackSlug,
+    kind: "track-audio",
+    fileName: originalFileName,
+    mimeType: file.mimetype,
+  });
+
+  if (!trackCoverUrl && metadata.picture?.data?.length) {
+    const ext = extFromMime(metadata.picture.format);
+    const coverFileName = `${artist.slug}-${releaseSlug}-${trackSlug}-${Date.now()}.${ext}`;
+    const coverPath = path.join(GENERATED_COVERS_ROOT, coverFileName);
+    await fs.writeFile(coverPath, metadata.picture.data);
+    trackCoverUrl = await uploadToRemoteWithFallback({
+      localFilePath: coverPath,
+      localUrl: `/generated/covers/${coverFileName}`,
+      artistSlug: artist.slug,
+      releaseSlug,
+      trackSlug,
+      kind: "track-cover",
+      fileName: coverFileName,
+      mimeType: metadata.picture.format,
+    });
+  }
+
+  const inferredGenre = metadata.genre || fallbackGenre || "Electronic";
+  const genre = await ensureGenreLinkedToArtist(artist.id, inferredGenre);
+
+  const trackId = `track_${Date.now()}_${indexSeed}_${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+  const duration = Math.max(30, metadata.duration || 0);
+  const plays = randomInt(1000, 5000);
+  const likes = randomInt(50, 250);
+
+  await prisma.track.create({
+    data: {
+      id: trackId,
+      artistId: artist.id,
+      releaseId,
+      title: metadata.title || trackTitle,
+      coverArtUrl: trackCoverUrl,
+      audioUrl: streamUrl,
+      previewUrl: streamUrl,
+      highQualityUrl: streamUrl,
+      originalUrl: streamUrl,
+      duration,
+      bpm: metadata.bpm,
+      keySignature: metadata.key,
+      genreId: genre.id,
+      waveformJson: JSON.stringify(createSyntheticWaveform(indexSeed + 1)),
+      price: Number.isFinite(trackPrice) && trackPrice > 0 ? trackPrice : 0.99,
+      currency: (currency || "USD").toUpperCase(),
+      isForSale: true,
+      isVisible: true,
+      sourcePath: path.relative(process.cwd(), originalPath),
+      plays,
+      likes,
+      createdAt: new Date(),
+    },
+  });
+
+  const autoComments = buildAutoComments({
+    trackId,
+    duration,
+    profiles: commenterProfiles,
+  });
+
+  if (autoComments.length > 0) {
+    await prisma.trackComment.createMany({
+      data: autoComments,
+    });
+  }
+
+  return {
+    trackId,
+    trackCoverUrl,
+  };
+};
+
 router.get(
   "/dashboard",
   requireArtist,
@@ -693,120 +826,45 @@ router.post(
       });
     }
 
-    const releaseTrackRoot = path.join(
-      studioStorageRoot,
-      artist.slug,
-      "releases",
-      releaseSlug,
-      "tracks",
-    );
-    await ensureDirectory(releaseTrackRoot);
-
+    const trackPrice = Number(req.body?.trackPrice ?? 0.99);
+    const currency = String(req.body?.currency || "USD").toUpperCase();
+    const trackImportErrors = [];
     for (let i = 0; i < trackFiles.length; i += 1) {
       const file = trackFiles[i];
-      const sourceExt = path.extname(file.originalname).toLowerCase() || ".mp3";
-      const trackBaseName = path.basename(file.originalname, sourceExt);
-      const trackSlug = slugify(trackBaseName || `track-${i + 1}`);
-      const trackTitle = humanizeSlug(trackBaseName || `track-${i + 1}`);
-      const trackDir = path.join(releaseTrackRoot, trackSlug);
-      await ensureDirectory(trackDir);
-
-      const originalFileName = `original${sourceExt}`;
-      const originalPath = path.join(trackDir, originalFileName);
-      await moveFile(file.path, originalPath);
-
-      const metadata = await parseTrackMetadata(originalPath);
-      let trackCoverUrl = releaseCoverUrl;
-      const streamUrl = await uploadToRemoteWithFallback({
-        localFilePath: originalPath,
-        localUrl: toMediaUrl(originalPath),
-        artistSlug: artist.slug,
-        releaseSlug,
-        trackSlug,
-        kind: "track-audio",
-        fileName: originalFileName,
-        mimeType: file.mimetype,
-      });
-
-      if (!trackCoverUrl && metadata.picture?.data?.length) {
-        const ext = extFromMime(metadata.picture.format);
-        const coverFileName = `${artist.slug}-${releaseSlug}-${trackSlug}.${ext}`;
-        const coverPath = path.join(GENERATED_COVERS_ROOT, coverFileName);
-        await fs.writeFile(coverPath, metadata.picture.data);
-        trackCoverUrl = await uploadToRemoteWithFallback({
-          localFilePath: coverPath,
-          localUrl: `/generated/covers/${coverFileName}`,
-          artistSlug: artist.slug,
-          releaseSlug,
-          trackSlug,
-          kind: "track-cover",
-          fileName: coverFileName,
-          mimeType: metadata.picture.format,
-        });
-      }
-
-      if (!releaseCoverUrl && trackCoverUrl) {
-        releaseCoverUrl = trackCoverUrl;
-      }
-
-      const inferredGenre =
-        metadata.genre ||
-        releaseGenres[0] ||
-        String(req.body?.genre || "Electronic");
-      const genre = await prisma.genre.upsert({
-        where: { name: inferredGenre },
-        update: {},
-        create: { name: inferredGenre },
-      });
-      await prisma.artistGenre.upsert({
-        where: { artistId_genreId: { artistId: artist.id, genreId: genre.id } },
-        update: {},
-        create: { artistId: artist.id, genreId: genre.id },
-      });
-
-      const trackId = `track_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`;
-      const duration = Math.max(30, metadata.duration || 0);
-      const plays = randomInt(1000, 5000);
-      const likes = randomInt(50, 250);
-
-      await prisma.track.create({
-        data: {
-          id: trackId,
-          artistId: artist.id,
+      try {
+        const createdTrack = await createTrackFromUpload({
+          artist,
           releaseId,
-          title: metadata.title || trackTitle,
-          coverArtUrl: trackCoverUrl,
-          audioUrl: streamUrl,
-          previewUrl: streamUrl,
-          highQualityUrl: streamUrl,
-          originalUrl: streamUrl,
-          duration,
-          bpm: metadata.bpm,
-          keySignature: metadata.key,
-          genreId: genre.id,
-          waveformJson: JSON.stringify(createSyntheticWaveform(i + 1)),
-          price: Number(req.body?.trackPrice ?? 0.99),
-          currency: String(req.body?.currency || "USD").toUpperCase(),
-          isForSale: true,
-          sourcePath: path.relative(process.cwd(), originalPath),
-          plays,
-          likes,
-          createdAt: new Date(),
-        },
-      });
-
-      const autoComments = buildAutoComments({
-        trackId,
-        duration,
-        profiles: commenterProfiles,
-      });
-      if (autoComments.length > 0) {
-        await prisma.trackComment.createMany({
-          data: autoComments,
+          releaseSlug,
+          releaseCoverUrl,
+          file,
+          indexSeed: i,
+          fallbackGenre: releaseGenres[0] || String(req.body?.genre || "Electronic"),
+          trackPrice,
+          currency,
+          commenterProfiles,
         });
+        if (!releaseCoverUrl && createdTrack.trackCoverUrl) {
+          releaseCoverUrl = createdTrack.trackCoverUrl;
+        }
+        createdTrackIds.push(createdTrack.trackId);
+      } catch (error) {
+        trackImportErrors.push(
+          `${file.originalname}: ${error instanceof Error ? error.message : "Track import failed."}`,
+        );
       }
+    }
 
-      createdTrackIds.push(trackId);
+    if (createdTrackIds.length === 0) {
+      await prisma.release.delete({
+        where: { id: releaseId },
+      });
+      res.status(400).json({
+        message:
+          trackImportErrors[0] ||
+          "Track upload failed. No tracks were imported for this release.",
+      });
+      return;
     }
 
     if (releaseCoverUrl) {
@@ -834,11 +892,133 @@ router.post(
     });
 
     res.status(201).json({
-      message: "Release uploaded successfully.",
+      message:
+        trackImportErrors.length > 0
+          ? `Release uploaded with ${createdTrackIds.length} track(s). ${trackImportErrors.length} track(s) failed.`
+          : "Release uploaded successfully.",
       release: serializeRelease(createdRelease),
       tracks: createdRelease.tracks
         .filter((track) => createdTrackIds.includes(track.id))
         .map(serializeTrack),
+      importErrors: trackImportErrors,
+    });
+  }),
+);
+
+router.post(
+  "/releases/:releaseId/tracks",
+  requireArtist,
+  upload.fields([{ name: "tracks", maxCount: 20 }]),
+  asyncHandler(async (req, res) => {
+    await ensureDirectory(uploadTmpDir);
+    await ensureDirectory(studioStorageRoot);
+    await ensureDirectory(GENERATED_COVERS_ROOT);
+
+    const artist = req.artist;
+    const release = await prisma.release.findUnique({
+      where: { id: req.params.releaseId },
+      include: {
+        genres: {
+          include: {
+            genre: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!release || release.artistId !== artist.id) {
+      res.status(404).json({ message: "Release not found." });
+      return;
+    }
+
+    const filesByField = req.files ?? {};
+    const trackFiles = filesByField.tracks ?? [];
+    if (!trackFiles.length) {
+      res.status(400).json({ message: "Please choose at least one track file." });
+      return;
+    }
+
+    const commenterProfiles = await resolveCommentProfiles();
+    const releaseGenres = release.genres.map((entry) => entry.genre.name).filter(Boolean);
+    const fallbackGenre = safeText(req.body?.genre, 80) || releaseGenres[0] || "Electronic";
+    const trackPrice = Number(req.body?.trackPrice ?? release.price ?? 0.99);
+    const currency = String(req.body?.currency || release.currency || "USD").toUpperCase();
+    const createdTrackIds = [];
+    const trackImportErrors = [];
+    let releaseCoverUrl = release.coverArtUrl || "";
+
+    for (let i = 0; i < trackFiles.length; i += 1) {
+      const file = trackFiles[i];
+      try {
+        const createdTrack = await createTrackFromUpload({
+          artist,
+          releaseId: release.id,
+          releaseSlug: release.slug,
+          releaseCoverUrl,
+          file,
+          indexSeed: i + createdTrackIds.length,
+          fallbackGenre,
+          trackPrice,
+          currency,
+          commenterProfiles,
+        });
+        if (!releaseCoverUrl && createdTrack.trackCoverUrl) {
+          releaseCoverUrl = createdTrack.trackCoverUrl;
+        }
+        createdTrackIds.push(createdTrack.trackId);
+      } catch (error) {
+        trackImportErrors.push(
+          `${file.originalname}: ${error instanceof Error ? error.message : "Track import failed."}`,
+        );
+      }
+    }
+
+    if (createdTrackIds.length === 0) {
+      res.status(400).json({
+        message:
+          trackImportErrors[0] ||
+          "Track upload failed. No tracks were imported for this release.",
+      });
+      return;
+    }
+
+    if (releaseCoverUrl && releaseCoverUrl !== release.coverArtUrl) {
+      await prisma.release.update({
+        where: { id: release.id },
+        data: { coverArtUrl: releaseCoverUrl },
+      });
+    }
+
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "TRACK",
+      action: "TRACKS_ADDED_TO_RELEASE",
+      details: {
+        releaseId: release.id,
+        addedTrackCount: createdTrackIds.length,
+      },
+    });
+
+    const updatedRelease = await prisma.release.findUnique({
+      where: { id: release.id },
+      include: studioReleaseInclude,
+    });
+
+    res.status(201).json({
+      message:
+        trackImportErrors.length > 0
+          ? `${createdTrackIds.length} track(s) added. ${trackImportErrors.length} track(s) failed.`
+          : "Tracks added to release.",
+      release: serializeRelease(updatedRelease),
+      tracks: updatedRelease.tracks
+        .filter((track) => createdTrackIds.includes(track.id))
+        .map(serializeTrack),
+      importErrors: trackImportErrors,
     });
   }),
 );

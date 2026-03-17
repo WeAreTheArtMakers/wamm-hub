@@ -113,6 +113,9 @@ export default function StudioPage() {
 
   const [activeReleaseId, setActiveReleaseId] = useState<string | null>(null);
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [activeTrackUploadReleaseId, setActiveTrackUploadReleaseId] = useState<string | null>(
+    null,
+  );
 
   const studioQuery = useQuery({
     queryKey: ["studio-dashboard"],
@@ -198,6 +201,13 @@ export default function StudioPage() {
     onSettled: () => setActiveTrackId(null),
   });
 
+  const addTracksToReleaseMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof api.addStudioTracksToRelease>[0]) =>
+      api.addStudioTracksToRelease(payload),
+    onSuccess: invalidateStudioData,
+    onSettled: () => setActiveTrackUploadReleaseId(null),
+  });
+
   const setTrackVisibilityMutation = useMutation({
     mutationFn: ({
       trackId,
@@ -216,7 +226,14 @@ export default function StudioPage() {
 
   const handleUploadSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!title.trim() || tracks.length === 0) return;
+    if (!title.trim()) {
+      alert("Please enter a release title.");
+      return;
+    }
+    if (tracks.length === 0) {
+      alert("Please choose at least one track file.");
+      return;
+    }
 
     uploadMutation.mutate({
       title: title.trim(),
@@ -332,6 +349,31 @@ export default function StudioPage() {
     );
     if (!ok) return;
     deleteTrackMutation.mutate(trackId);
+  };
+
+  const handleAddTracksSubmit = (
+    event: React.FormEvent<HTMLFormElement>,
+    releaseId: string,
+  ) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const files = formData
+      .getAll("tracks")
+      .filter((item) => item instanceof File && item.size > 0) as File[];
+    if (files.length === 0) {
+      alert("Please choose track audio files to add.");
+      return;
+    }
+
+    setActiveTrackUploadReleaseId(releaseId);
+    addTracksToReleaseMutation.mutate({
+      releaseId,
+      tracks: files,
+      trackPrice: toPositiveNumber(String(formData.get("trackPrice") ?? "")),
+      genre: String(formData.get("genre") ?? "").trim() || undefined,
+      currency: String(formData.get("currency") ?? "").trim() || undefined,
+    });
   };
 
   if (!sessionUser) {
@@ -773,6 +815,63 @@ export default function StudioPage() {
                     </button>
                   </form>
 
+                  <form
+                    onSubmit={(event) => handleAddTracksSubmit(event, release.id)}
+                    className="razor-border p-3 space-y-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-mono-data text-muted-foreground">
+                        Add Tracks To This Release
+                      </span>
+                      <span className="font-mono-data text-[11px] text-muted-foreground">
+                        Fixes empty releases and appends new songs.
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
+                      <FileSelector
+                        name="tracks"
+                        multiple
+                        accept=".mp3,.wav,.flac,.m4a"
+                        buttonLabel="Choose Track Files"
+                        helperText="Select one or more audio files to append."
+                      />
+                      <input
+                        name="trackPrice"
+                        defaultValue={release.price.toFixed(2)}
+                        className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                        placeholder="Track price"
+                      />
+                      <input
+                        name="genre"
+                        defaultValue={release.genres[0] ?? ""}
+                        className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                        placeholder="Default genre"
+                      />
+                      <input
+                        name="currency"
+                        defaultValue={release.currency}
+                        className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                        placeholder="Currency"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={
+                        addTracksToReleaseMutation.isPending &&
+                        activeTrackUploadReleaseId === release.id
+                      }
+                      className="px-4 py-2.5 bg-foreground text-background font-mono-data hover:bg-accent hover:text-accent-foreground transition-colors press-effect disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                    >
+                      {addTracksToReleaseMutation.isPending &&
+                      activeTrackUploadReleaseId === release.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="w-3.5 h-3.5" />
+                      )}
+                      Add Tracks
+                    </button>
+                  </form>
+
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="font-mono-data text-muted-foreground">
@@ -963,6 +1062,11 @@ export default function StudioPage() {
               {deleteTrackMutation.isError && (
                 <p className="text-sm text-destructive">
                   {deleteTrackMutation.error.message}
+                </p>
+              )}
+              {addTracksToReleaseMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {addTracksToReleaseMutation.error.message}
                 </p>
               )}
             </div>
