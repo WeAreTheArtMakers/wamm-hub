@@ -67,6 +67,7 @@ export const serializeTrack = (track) => ({
   price: Number(track.price ?? 0),
   currency: track.currency ?? "USD",
   isForSale: Boolean(track.isForSale),
+  isVisible: typeof track.isVisible === "boolean" ? track.isVisible : true,
   sourcePath: track.sourcePath ?? undefined,
   plays: track.plays,
   likes: track.likes,

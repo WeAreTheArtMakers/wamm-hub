@@ -77,32 +77,6 @@ const englishEnds = [
   "Top tier production.",
 ];
 
-const turkishStarts = [
-  "Buradaki geçiş çok iyi olmuş.",
-  "Kulaklıkta inanılmaz duyuluyor.",
-  "Ritim burada çok sağlam.",
-  "Atmosfer efsane bir seviyede.",
-  "Baslar net ve dengeli.",
-  "Bu kısım direkt tekrar dinletiyor.",
-  "Synth tonu çok karakterli.",
-  "Davullar aşırı temiz.",
-  "Buradaki enerji çok yüksek.",
-  "Bu an şarkının zirvesi.",
-];
-
-const turkishEnds = [
-  "Listeme direkt ekledim.",
-  "Prodüksiyon gerçekten çok güçlü.",
-  "Gece sürüşü için birebir.",
-  "Tekrar tekrar dinlenir.",
-  "Burası ayrı bir dünya olmuş.",
-  "Detaylar çok iyi düşünülmüş.",
-  "Her dinleyişte yeni bir şey yakalıyorum.",
-  "Çok profesyonel bir iş.",
-  "Yorum bırakmadan geçemedim.",
-  "Tam canlı performanslık bölüm.",
-];
-
 const studioTrackInclude = {
   artist: {
     select: {
@@ -206,9 +180,8 @@ const createRng = (seedInput) => {
 };
 
 const createCommentText = (rng) => {
-  const isEnglish = rng() < 0.5;
-  const starts = isEnglish ? englishStarts : turkishStarts;
-  const ends = isEnglish ? englishEnds : turkishEnds;
+  const starts = englishStarts;
+  const ends = englishEnds;
   const start = starts[Math.floor(rng() * starts.length)];
   const end = ends[Math.floor(rng() * ends.length)];
   return `${start} ${end}`;
@@ -940,6 +913,8 @@ router.patch(
       });
     }
 
+    const syncTrackCoversFlag = parseBooleanFlag(req.body?.syncTrackCovers);
+
     if (Object.keys(updateData).length === 0) {
       const currentRelease = await prisma.release.findUnique({
         where: { id: release.id },
@@ -956,6 +931,30 @@ router.patch(
       where: { id: release.id },
       data: updateData,
     });
+
+    if (updateData.coverArtUrl) {
+      const visibleTrackCount = await prisma.track.count({
+        where: {
+          releaseId: release.id,
+          isVisible: true,
+        },
+      });
+      const shouldSyncTrackCovers =
+        syncTrackCoversFlag === true ||
+        (syncTrackCoversFlag !== false && visibleTrackCount <= 1);
+
+      if (shouldSyncTrackCovers) {
+        await prisma.track.updateMany({
+          where: {
+            releaseId: release.id,
+            isVisible: true,
+          },
+          data: {
+            coverArtUrl: updateData.coverArtUrl,
+          },
+        });
+      }
+    }
 
     await logArtistActivity({
       artistId: artist.id,
@@ -983,14 +982,26 @@ router.patch(
 router.patch(
   "/tracks/:trackId",
   requireArtist,
-  upload.single("cover"),
+  upload.fields([
+    { name: "cover", maxCount: 1 },
+    { name: "audio", maxCount: 1 },
+  ]),
   asyncHandler(async (req, res) => {
     await ensureDirectory(uploadTmpDir);
     await ensureDirectory(GENERATED_COVERS_ROOT);
+    await ensureDirectory(studioStorageRoot);
 
     const artist = req.artist;
     const track = await prisma.track.findUnique({
       where: { id: req.params.trackId },
+      include: {
+        release: {
+          select: {
+            id: true,
+            slug: true,
+          },
+        },
+      },
     });
 
     if (!track || track.artistId !== artist.id) {
@@ -998,7 +1009,14 @@ router.patch(
       return;
     }
 
+    const filesByField = req.files ?? {};
+    const coverUpload = filesByField.cover?.[0] ?? null;
+    const audioUpload = filesByField.audio?.[0] ?? null;
+
     const updateData = {};
+    const syncReleaseCoverFlag = parseBooleanFlag(req.body?.syncReleaseCover);
+    const shouldSyncReleaseCover = syncReleaseCoverFlag !== false;
+    let coverUpdatedFromTrack = null;
 
     const title = safeText(req.body?.title, 180);
     if (title.length >= 1) {
@@ -1013,6 +1031,11 @@ router.patch(
     const isForSale = parseBooleanFlag(req.body?.isForSale);
     if (typeof isForSale === "boolean") {
       updateData.isForSale = isForSale;
+    }
+
+    const isVisible = parseBooleanFlag(req.body?.isVisible);
+    if (typeof isVisible === "boolean") {
+      updateData.isVisible = isVisible;
     }
 
     const bpm = parseOptionalInt(req.body?.bpm);
@@ -1049,23 +1072,94 @@ router.patch(
       updateData.genreId = genre.id;
     }
 
-    if (req.file) {
+    if (coverUpload) {
       const ext =
-        path.extname(req.file.originalname).replace(".", "").toLowerCase() ||
-        extFromMime(req.file.mimetype);
+        path.extname(coverUpload.originalname).replace(".", "").toLowerCase() ||
+        extFromMime(coverUpload.mimetype);
       const fileName = `${artist.slug}-${slugify(track.title)}-${Date.now()}.${ext}`;
       const target = path.join(GENERATED_COVERS_ROOT, fileName);
-      await moveFile(req.file.path, target);
+      await moveFile(coverUpload.path, target);
       updateData.coverArtUrl = await uploadToRemoteWithFallback({
         localFilePath: target,
         localUrl: `/generated/covers/${fileName}`,
         artistSlug: artist.slug,
-        releaseSlug: track.releaseId ?? "single",
+        releaseSlug: track.release?.slug ?? "single",
         trackSlug: slugify(track.title),
         kind: "track-cover",
         fileName,
-        mimeType: req.file.mimetype,
+        mimeType: coverUpload.mimetype,
       });
+      coverUpdatedFromTrack = updateData.coverArtUrl;
+    }
+
+    if (audioUpload) {
+      const sourceExt = path.extname(audioUpload.originalname).toLowerCase() || ".mp3";
+      const nextTrackTitle = title || track.title;
+      const trackSlug = slugify(nextTrackTitle || `track-${track.id}`);
+      const releaseSlug = track.release?.slug ?? "single";
+      const trackDir = path.join(
+        studioStorageRoot,
+        artist.slug,
+        "releases",
+        releaseSlug,
+        "tracks",
+        trackSlug,
+      );
+      await ensureDirectory(trackDir);
+
+      const fileName = `original${sourceExt}`;
+      const filePath = path.join(trackDir, fileName);
+      await moveFile(audioUpload.path, filePath);
+      const metadata = await parseTrackMetadata(filePath);
+
+      const streamUrl = await uploadToRemoteWithFallback({
+        localFilePath: filePath,
+        localUrl: toMediaUrl(filePath),
+        artistSlug: artist.slug,
+        releaseSlug,
+        trackSlug,
+        kind: "track-audio",
+        fileName,
+        mimeType: audioUpload.mimetype,
+      });
+
+      updateData.audioUrl = streamUrl;
+      updateData.previewUrl = streamUrl;
+      updateData.highQualityUrl = streamUrl;
+      updateData.originalUrl = streamUrl;
+      updateData.sourcePath = path.relative(process.cwd(), filePath);
+      updateData.duration = Math.max(1, metadata.duration || track.duration || 1);
+      updateData.waveformJson = JSON.stringify(createSyntheticWaveform(Date.now()));
+
+      if (!title && metadata.title) {
+        updateData.title = safeText(metadata.title, 180) || track.title;
+      }
+
+      if (!updateData.bpm && typeof metadata.bpm === "number") {
+        updateData.bpm = metadata.bpm;
+      }
+
+      if (!updateData.keySignature && metadata.key) {
+        updateData.keySignature = safeText(metadata.key, 16);
+      }
+
+      if (!coverUpload && metadata.picture?.data?.length) {
+        const pictureExt = extFromMime(metadata.picture.format);
+        const pictureFileName = `${artist.slug}-${releaseSlug}-${trackSlug}-${Date.now()}.${pictureExt}`;
+        const picturePath = path.join(GENERATED_COVERS_ROOT, pictureFileName);
+        await fs.writeFile(picturePath, metadata.picture.data);
+        updateData.coverArtUrl = await uploadToRemoteWithFallback({
+          localFilePath: picturePath,
+          localUrl: `/generated/covers/${pictureFileName}`,
+          artistSlug: artist.slug,
+          releaseSlug,
+          trackSlug,
+          kind: "track-cover",
+          fileName: pictureFileName,
+          mimeType: metadata.picture.format,
+        });
+        coverUpdatedFromTrack = updateData.coverArtUrl;
+      }
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -1095,6 +1189,23 @@ router.patch(
       data: updateData,
     });
 
+    if (track.releaseId && coverUpdatedFromTrack && shouldSyncReleaseCover) {
+      const visibleTrackCount = await prisma.track.count({
+        where: {
+          releaseId: track.releaseId,
+          isVisible: true,
+        },
+      });
+      const shouldPromoteToReleaseCover =
+        syncReleaseCoverFlag === true || visibleTrackCount <= 1;
+      if (shouldPromoteToReleaseCover) {
+        await prisma.release.update({
+          where: { id: track.releaseId },
+          data: { coverArtUrl: coverUpdatedFromTrack },
+        });
+      }
+    }
+
     await logArtistActivity({
       artistId: artist.id,
       actorUserId: req.user?.id ?? null,
@@ -1103,6 +1214,7 @@ router.patch(
       details: {
         trackId: track.id,
         changedFields: Object.keys(updateData),
+        replacedAudio: Boolean(audioUpload),
       },
     });
 
@@ -1124,6 +1236,213 @@ router.patch(
     res.json({
       message: "Track updated.",
       track: serializeTrack(updatedTrack),
+    });
+  }),
+);
+
+router.patch(
+  "/tracks/:trackId/visibility",
+  requireArtist,
+  asyncHandler(async (req, res) => {
+    const artist = req.artist;
+    const requestedVisibility = parseBooleanFlag(req.body?.isVisible);
+    if (typeof requestedVisibility !== "boolean") {
+      res.status(400).json({ message: "isVisible boolean is required." });
+      return;
+    }
+
+    const track = await prisma.track.findUnique({
+      where: { id: req.params.trackId },
+      include: {
+        release: {
+          select: {
+            id: true,
+            coverArtUrl: true,
+          },
+        },
+      },
+    });
+
+    if (!track || track.artistId !== artist.id) {
+      res.status(404).json({ message: "Track not found." });
+      return;
+    }
+
+    await prisma.track.update({
+      where: { id: track.id },
+      data: {
+        isVisible: requestedVisibility,
+      },
+    });
+
+    if (track.releaseId) {
+      if (!requestedVisibility && track.release?.coverArtUrl === track.coverArtUrl) {
+        const nextVisibleCover = await prisma.track.findFirst({
+          where: {
+            releaseId: track.releaseId,
+            id: { not: track.id },
+            isVisible: true,
+            coverArtUrl: {
+              not: null,
+            },
+          },
+          orderBy: { createdAt: "asc" },
+          select: {
+            coverArtUrl: true,
+          },
+        });
+        if (nextVisibleCover?.coverArtUrl) {
+          await prisma.release.update({
+            where: { id: track.releaseId },
+            data: { coverArtUrl: nextVisibleCover.coverArtUrl },
+          });
+        }
+      }
+
+      if (requestedVisibility && track.coverArtUrl && !track.release?.coverArtUrl) {
+        await prisma.release.update({
+          where: { id: track.releaseId },
+          data: { coverArtUrl: track.coverArtUrl },
+        });
+      }
+    }
+
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "TRACK",
+      action: requestedVisibility ? "TRACK_UNHIDDEN" : "TRACK_HIDDEN",
+      details: {
+        trackId: track.id,
+      },
+    });
+
+    const updatedTrack = await prisma.track.findUnique({
+      where: { id: track.id },
+      include: {
+        ...studioTrackInclude,
+        release: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    res.json({
+      message: requestedVisibility ? "Track is now visible." : "Track is hidden.",
+      track: serializeTrack(updatedTrack),
+    });
+  }),
+);
+
+router.delete(
+  "/tracks/:trackId",
+  requireArtist,
+  asyncHandler(async (req, res) => {
+    const artist = req.artist;
+    const hardDelete = parseBooleanFlag(req.body?.hardDelete) !== false;
+    const track = await prisma.track.findUnique({
+      where: { id: req.params.trackId },
+      include: {
+        release: {
+          select: {
+            id: true,
+            coverArtUrl: true,
+          },
+        },
+      },
+    });
+
+    if (!track || track.artistId !== artist.id) {
+      res.status(404).json({ message: "Track not found." });
+      return;
+    }
+
+    if (!hardDelete) {
+      await prisma.track.update({
+        where: { id: track.id },
+        data: {
+          isVisible: false,
+        },
+      });
+      res.json({
+        message: "Track hidden.",
+      });
+      return;
+    }
+
+    const linkedOrders = await prisma.order.count({
+      where: { trackId: track.id },
+    });
+    if (linkedOrders > 0) {
+      res.status(400).json({
+        message:
+          "Track has purchase history and cannot be permanently deleted. Hide it instead.",
+      });
+      return;
+    }
+
+    if (track.releaseId) {
+      const visibleTrackCount = await prisma.track.count({
+        where: {
+          releaseId: track.releaseId,
+          isVisible: true,
+        },
+      });
+      if (visibleTrackCount <= 1) {
+        res.status(400).json({
+          message:
+            "You cannot delete the last visible track in a release. Hide it or upload a replacement first.",
+        });
+        return;
+      }
+    }
+
+    await prisma.track.delete({
+      where: {
+        id: track.id,
+      },
+    });
+
+    if (track.releaseId && track.release?.coverArtUrl === track.coverArtUrl) {
+      const replacementCover = await prisma.track.findFirst({
+        where: {
+          releaseId: track.releaseId,
+          isVisible: true,
+          coverArtUrl: {
+            not: null,
+          },
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          coverArtUrl: true,
+        },
+      });
+      if (replacementCover?.coverArtUrl) {
+        await prisma.release.update({
+          where: { id: track.releaseId },
+          data: { coverArtUrl: replacementCover.coverArtUrl },
+        });
+      }
+    }
+
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "TRACK",
+      action: "TRACK_DELETED",
+      details: {
+        trackId: track.id,
+      },
+    });
+
+    res.json({
+      message: "Track deleted permanently.",
+      trackId: track.id,
     });
   }),
 );

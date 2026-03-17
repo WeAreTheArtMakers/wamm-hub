@@ -37,7 +37,11 @@ const releaseInclude = {
   },
   genres: { include: { genre: true } },
   _count: { select: { likes: true } },
-  tracks: { include: trackInclude, orderBy: { createdAt: "asc" } },
+  tracks: {
+    where: { isVisible: true },
+    include: trackInclude,
+    orderBy: { createdAt: "asc" },
+  },
 };
 
 const artistInclude = {
@@ -48,6 +52,11 @@ const artistInclude = {
 const publishedReleaseWhere = {
   published: true,
   status: "PUBLISHED",
+  tracks: {
+    some: {
+      isVisible: true,
+    },
+  },
 };
 
 const asyncHandler =
@@ -78,6 +87,7 @@ router.get(
       }),
       prisma.track.findMany({
         where: {
+          isVisible: true,
           release: publishedReleaseWhere,
         },
         include: trackInclude,
@@ -185,6 +195,10 @@ router.get(
     }
 
     const serialized = serializeRelease(release);
+    if (serialized.trackCount === 0) {
+      res.status(404).json({ message: "Release not found" });
+      return;
+    }
     res.json({
       ...serialized,
       likedByMe: Array.isArray(release.likes) ? release.likes.length > 0 : false,
@@ -308,7 +322,7 @@ router.get(
           orderBy: { releaseDate: "desc" },
         },
         tracks: {
-          where: { release: publishedReleaseWhere },
+          where: { isVisible: true, release: publishedReleaseWhere },
           include: trackInclude,
           orderBy: { createdAt: "desc" },
         },
@@ -343,6 +357,7 @@ router.get(
 
     const tracks = await prisma.track.findMany({
       where: {
+        isVisible: true,
         release: publishedReleaseWhere,
         ...(genre ? { genre: { name: genre } } : {}),
         ...(artistId ? { artistId } : {}),
@@ -385,6 +400,7 @@ router.get(
       }),
       prisma.track.findMany({
         where: {
+          isVisible: true,
           release: publishedReleaseWhere,
           ...(genre ? { genre: { name: genre } } : {}),
         },
@@ -432,6 +448,7 @@ router.get(
       }),
       prisma.track.findMany({
         where: {
+          isVisible: true,
           release: publishedReleaseWhere,
           OR: [{ title: { contains: q } }, { artist: { name: { contains: q } } }],
         },

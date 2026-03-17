@@ -5,13 +5,17 @@ import { motion } from "framer-motion";
 import {
   ArrowLeft,
   CheckCircle2,
+  Eye,
+  EyeOff,
+  FileAudio2,
+  FolderCog,
+  ImagePlus,
+  Landmark,
   Loader2,
   Save,
+  Trash2,
   Upload,
   Wallet,
-  Landmark,
-  Music2,
-  ImagePlus,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { getSessionUser } from "@/lib/auth";
@@ -74,9 +78,11 @@ export default function StudioPage() {
       queryClient.invalidateQueries({ queryKey: ["studio-dashboard"] }),
       queryClient.invalidateQueries({ queryKey: ["home"] }),
       queryClient.invalidateQueries({ queryKey: ["releases"] }),
+      queryClient.invalidateQueries({ queryKey: ["release"] }),
       queryClient.invalidateQueries({ queryKey: ["discover"] }),
       queryClient.invalidateQueries({ queryKey: ["tracks"] }),
       queryClient.invalidateQueries({ queryKey: ["artists"] }),
+      queryClient.invalidateQueries({ queryKey: ["artist"] }),
     ]);
   };
 
@@ -131,6 +137,22 @@ export default function StudioPage() {
     onSettled: () => setActiveTrackId(null),
   });
 
+  const setTrackVisibilityMutation = useMutation({
+    mutationFn: ({
+      trackId,
+      isVisible,
+    }: {
+      trackId: string;
+      isVisible: boolean;
+    }) => api.setStudioTrackVisibility(trackId, isVisible),
+    onSuccess: invalidateStudioData,
+  });
+
+  const deleteTrackMutation = useMutation({
+    mutationFn: (trackId: string) => api.deleteStudioTrack(trackId, true),
+    onSuccess: invalidateStudioData,
+  });
+
   const handleUploadSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!title.trim() || tracks.length === 0) return;
@@ -177,6 +199,7 @@ export default function StudioPage() {
     const statusInput = String(formData.get("status") ?? "").trim();
     const isForSale = formData.get("isForSale") === "on";
     const coverFile = formData.get("cover");
+    const syncTrackCovers = formData.get("syncTrackCovers") === "on";
 
     setActiveReleaseId(releaseId);
     updateReleaseMutation.mutate({
@@ -192,6 +215,7 @@ export default function StudioPage() {
             ? statusInput
             : undefined,
         isForSale,
+        syncTrackCovers,
         cover: coverFile instanceof File && coverFile.size > 0 ? coverFile : undefined,
       },
     });
@@ -211,7 +235,10 @@ export default function StudioPage() {
     const bpmInput = toPositiveNumber(String(formData.get("bpm") ?? ""));
     const keySignatureInput = String(formData.get("keySignature") ?? "").trim();
     const isForSale = formData.get("isForSale") === "on";
+    const isVisible = formData.get("isVisible") === "on";
+    const syncReleaseCover = formData.get("syncReleaseCover") === "on";
     const coverFile = formData.get("cover");
+    const audioFile = formData.get("audio");
 
     setActiveTrackId(trackId);
     updateTrackMutation.mutate({
@@ -223,16 +250,36 @@ export default function StudioPage() {
         bpm: typeof bpmInput === "number" ? Math.round(bpmInput) : undefined,
         keySignature: keySignatureInput,
         isForSale,
+        isVisible,
+        syncReleaseCover,
         cover: coverFile instanceof File && coverFile.size > 0 ? coverFile : undefined,
+        audio: audioFile instanceof File && audioFile.size > 0 ? audioFile : undefined,
       },
     });
+  };
+
+  const handleTrackVisibilityToggle = (trackId: string, isVisible: boolean) => {
+    setTrackVisibilityMutation.mutate({
+      trackId,
+      isVisible,
+    });
+  };
+
+  const handleTrackDelete = (trackId: string, trackTitle: string) => {
+    const ok = window.confirm(
+      `Delete "${trackTitle}" permanently? This cannot be undone.`,
+    );
+    if (!ok) return;
+    deleteTrackMutation.mutate(trackId);
   };
 
   if (!sessionUser) {
     return (
       <div className="max-w-[1000px] mx-auto px-4 py-16">
         <h1 className="font-display text-3xl mb-3">Artist Studio</h1>
-        <p className="text-muted-foreground mb-6">Studioya erişmek için giriş yapmalısın.</p>
+        <p className="text-muted-foreground mb-6">
+          You need to sign in to access the studio.
+        </p>
         <Link to="/login" className="font-mono-data text-accent hover:underline">
           Sign in
         </Link>
@@ -244,14 +291,15 @@ export default function StudioPage() {
     return (
       <div className="max-w-[1000px] mx-auto px-4 py-16">
         <h1 className="font-display text-3xl mb-3">Artist Studio</h1>
-        <p className="text-muted-foreground">Studio yalnızca artist hesapları için aktif.</p>
+        <p className="text-muted-foreground">
+          Studio access is available for artist accounts only.
+        </p>
       </div>
     );
   }
 
   const artist = studioQuery.data?.artist;
   const releases = studioQuery.data?.releases ?? [];
-  const artistTracks = studioQuery.data?.tracks ?? [];
   const activityLogs = studioQuery.data?.activityLogs ?? [];
 
   return (
@@ -269,7 +317,7 @@ export default function StudioPage() {
 
       <h1 className="font-display text-3xl mb-2">WAMM Artist Studio</h1>
       <p className="text-sm text-muted-foreground mb-6">
-        Profil, ödeme bilgileri, release ve parçaları tek panelden yönet.
+        Manage your profile, payout settings, releases, and tracks from one panel.
       </p>
 
       {studioQuery.isLoading && (
@@ -469,7 +517,9 @@ export default function StudioPage() {
               </div>
 
               <div>
-                <label className="font-mono-data text-muted-foreground mb-1 block">Description</label>
+                <label className="font-mono-data text-muted-foreground mb-1 block">
+                  Description
+                </label>
                 <textarea
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
@@ -480,7 +530,9 @@ export default function StudioPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-mono-data text-muted-foreground mb-1 block">Price (USD)</label>
+                  <label className="font-mono-data text-muted-foreground mb-1 block">
+                    Price (USD)
+                  </label>
                   <input
                     value={price}
                     onChange={(event) => setPrice(event.target.value)}
@@ -488,7 +540,9 @@ export default function StudioPage() {
                   />
                 </div>
                 <div>
-                  <label className="font-mono-data text-muted-foreground mb-1 block">Genres</label>
+                  <label className="font-mono-data text-muted-foreground mb-1 block">
+                    Genres
+                  </label>
                   <input
                     value={genres}
                     onChange={(event) => setGenres(event.target.value)}
@@ -499,7 +553,9 @@ export default function StudioPage() {
               </div>
 
               <div>
-                <label className="font-mono-data text-muted-foreground mb-1 block">Track Files</label>
+                <label className="font-mono-data text-muted-foreground mb-1 block">
+                  Track Files
+                </label>
                 <input
                   type="file"
                   multiple
@@ -510,7 +566,9 @@ export default function StudioPage() {
               </div>
 
               <div>
-                <label className="font-mono-data text-muted-foreground mb-1 block">Release Cover</label>
+                <label className="font-mono-data text-muted-foreground mb-1 block">
+                  Release Cover
+                </label>
                 <input
                   type="file"
                   accept=".jpg,.jpeg,.png,.webp"
@@ -552,188 +610,301 @@ export default function StudioPage() {
             </form>
 
             <div className="space-y-4">
-              <h2 className="font-display text-xl">Release Management</h2>
+              <h2 className="font-display text-xl">Catalog Management</h2>
               {releases.length === 0 && (
                 <p className="font-mono-data text-muted-foreground">No releases yet.</p>
               )}
 
               {releases.map((release) => (
-                <form
-                  key={release.id}
-                  onSubmit={(event) => handleReleaseSubmit(event, release.id)}
-                  className="razor-border p-4 space-y-3"
-                >
-                  <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <h3 className="font-display text-lg truncate">{release.title}</h3>
-                      <p className="font-mono-data text-muted-foreground text-sm">
-                        {release.trackCount} tracks · {release.currency} {release.price.toFixed(2)}
-                      </p>
-                    </div>
-                    {release.status !== "PUBLISHED" && (
-                      <button
-                        type="button"
-                        onClick={() => publishMutation.mutate(release.id)}
-                        disabled={publishMutation.isPending}
-                        className="px-3 py-2 bg-foreground text-background font-mono-data hover:bg-accent hover:text-accent-foreground transition-colors press-effect disabled:opacity-50"
-                      >
-                        Publish
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input
-                      name="title"
-                      defaultValue={release.title}
-                      className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
-                      placeholder="Release title"
-                    />
-                    <input
-                      name="price"
-                      defaultValue={release.price.toFixed(2)}
-                      className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
-                      placeholder="Price"
-                    />
-                  </div>
-
-                  <textarea
-                    name="description"
-                    defaultValue={release.description}
-                    className="w-full min-h-[80px] px-3 py-2.5 bg-secondary razor-border text-sm"
-                    placeholder="Release description"
-                  />
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
-                    <select
-                      name="status"
-                      defaultValue={release.status}
-                      className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
-                    >
-                      <option value="DRAFT">DRAFT</option>
-                      <option value="PUBLISHED">PUBLISHED</option>
-                      <option value="ARCHIVED">ARCHIVED</option>
-                    </select>
-                    <label className="flex items-center gap-2 text-sm font-mono-data text-muted-foreground">
-                      <input type="checkbox" name="isForSale" defaultChecked={release.isForSale} />
-                      For Sale
-                    </label>
-                    <input
-                      type="file"
-                      name="cover"
-                      accept=".jpg,.jpeg,.png,.webp"
-                      className="w-full text-sm"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={updateReleaseMutation.isPending && activeReleaseId === release.id}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-foreground text-background font-mono-data hover:bg-accent hover:text-accent-foreground transition-colors press-effect disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                <article key={release.id} className="razor-border p-4 space-y-4">
+                  <form
+                    onSubmit={(event) => handleReleaseSubmit(event, release.id)}
+                    className="space-y-3"
                   >
-                    {updateReleaseMutation.isPending && activeReleaseId === release.id ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <ImagePlus className="w-3.5 h-3.5" />
-                    )}
-                    Save Release
-                  </button>
-                </form>
-              ))}
-            </div>
-          </section>
+                    <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <h3 className="font-display text-lg truncate">{release.title}</h3>
+                        <p className="font-mono-data text-muted-foreground text-sm">
+                          {release.trackCount} tracks · {release.currency}{" "}
+                          {release.price.toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {release.status !== "PUBLISHED" && (
+                          <button
+                            type="button"
+                            onClick={() => publishMutation.mutate(release.id)}
+                            disabled={publishMutation.isPending}
+                            className="px-3 py-2 bg-foreground text-background font-mono-data hover:bg-accent hover:text-accent-foreground transition-colors press-effect disabled:opacity-50"
+                          >
+                            Publish
+                          </button>
+                        )}
+                      </div>
+                    </div>
 
-          <section className="space-y-4">
-            <h2 className="font-display text-xl">Track Management</h2>
-            {artistTracks.length === 0 && (
-              <p className="font-mono-data text-muted-foreground">No tracks yet.</p>
-            )}
-            {artistTracks.map((track) => (
-              <form
-                key={track.id}
-                onSubmit={(event) => handleTrackSubmit(event, track.id)}
-                className="razor-border p-4 space-y-3"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-12 h-12 razor-border overflow-hidden bg-secondary shrink-0">
-                    {track.coverArtUrl ? (
-                      <img src={track.coverArtUrl} alt={track.title} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Music2 className="w-4 h-4 text-muted-foreground" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <input
+                        name="title"
+                        defaultValue={release.title}
+                        className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                        placeholder="Release title"
+                      />
+                      <input
+                        name="price"
+                        defaultValue={release.price.toFixed(2)}
+                        className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                        placeholder="Price"
+                      />
+                    </div>
+
+                    <textarea
+                      name="description"
+                      defaultValue={release.description}
+                      className="w-full min-h-[80px] px-3 py-2.5 bg-secondary razor-border text-sm"
+                      placeholder="Release description"
+                    />
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-center">
+                      <select
+                        name="status"
+                        defaultValue={release.status}
+                        className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                      >
+                        <option value="DRAFT">DRAFT</option>
+                        <option value="PUBLISHED">PUBLISHED</option>
+                        <option value="ARCHIVED">ARCHIVED</option>
+                      </select>
+                      <label className="flex items-center gap-2 text-sm font-mono-data text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          name="isForSale"
+                          defaultChecked={release.isForSale}
+                        />
+                        For Sale
+                      </label>
+                      <label className="flex items-center gap-2 text-sm font-mono-data text-muted-foreground">
+                        <input type="checkbox" name="syncTrackCovers" defaultChecked />
+                        Apply cover to tracks
+                      </label>
+                      <input
+                        type="file"
+                        name="cover"
+                        accept=".jpg,.jpeg,.png,.webp"
+                        className="w-full text-sm"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={
+                        updateReleaseMutation.isPending && activeReleaseId === release.id
+                      }
+                      className="w-full sm:w-auto px-4 py-2.5 bg-foreground text-background font-mono-data hover:bg-accent hover:text-accent-foreground transition-colors press-effect disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                    >
+                      {updateReleaseMutation.isPending &&
+                      activeReleaseId === release.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <ImagePlus className="w-3.5 h-3.5" />
+                      )}
+                      Save Release
+                    </button>
+                  </form>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono-data text-muted-foreground">
+                        Tracks ({release.tracks.length})
+                      </span>
+                    </div>
+
+                    {release.tracks.length === 0 && (
+                      <div className="razor-border p-3 font-mono-data text-muted-foreground">
+                        No tracks in this release.
                       </div>
                     )}
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-display text-lg truncate">{track.title}</h3>
-                    <p className="font-mono-data text-muted-foreground text-sm">
-                      {track.likes} likes · {Math.round(track.plays / 100) / 10}K plays · {track.comments.length} comments
-                    </p>
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  <input
-                    name="title"
-                    defaultValue={track.title}
-                    className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
-                    placeholder="Track title"
-                  />
-                  <input
-                    name="genre"
-                    defaultValue={track.genre}
-                    className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
-                    placeholder="Genre"
-                  />
-                  <input
-                    name="price"
-                    defaultValue={track.price.toFixed(2)}
-                    className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
-                    placeholder="Price"
-                  />
-                  <input
-                    name="bpm"
-                    defaultValue={track.bpm ?? ""}
-                    className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
-                    placeholder="BPM"
-                  />
-                  <input
-                    name="keySignature"
-                    defaultValue={track.key ?? ""}
-                    className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
-                    placeholder="Key"
-                  />
-                  <input
-                    type="file"
-                    name="cover"
-                    accept=".jpg,.jpeg,.png,.webp"
-                    className="w-full text-sm"
-                  />
-                </div>
+                    {release.tracks.map((track) => (
+                      <form
+                        key={track.id}
+                        onSubmit={(event) => handleTrackSubmit(event, track.id)}
+                        className={`razor-border p-3 space-y-3 ${
+                          track.isVisible ? "" : "opacity-70"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-12 h-12 razor-border overflow-hidden bg-secondary shrink-0">
+                            {track.coverArtUrl ? (
+                              <img
+                                src={track.coverArtUrl}
+                                alt={track.title}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                                <ImagePlus className="w-4 h-4" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <h4 className="font-display text-base truncate">
+                                {track.title}
+                              </h4>
+                              {!track.isVisible && (
+                                <span className="font-mono-data text-[10px] text-accent">
+                                  HIDDEN
+                                </span>
+                              )}
+                            </div>
+                            <p className="font-mono-data text-muted-foreground text-xs">
+                              {track.likes} likes ·{" "}
+                              {Math.round(track.plays / 100) / 10}K plays ·{" "}
+                              {track.comments.length} comments
+                            </p>
+                          </div>
+                        </div>
 
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <label className="flex items-center gap-2 text-sm font-mono-data text-muted-foreground">
-                    <input type="checkbox" name="isForSale" defaultChecked={track.isForSale} />
-                    For Sale
-                  </label>
-                  <button
-                    type="submit"
-                    disabled={updateTrackMutation.isPending && activeTrackId === track.id}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-foreground text-background font-mono-data hover:bg-accent hover:text-accent-foreground transition-colors press-effect disabled:opacity-50 inline-flex items-center justify-center gap-2"
-                  >
-                    {updateTrackMutation.isPending && activeTrackId === track.id ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Save className="w-3.5 h-3.5" />
-                    )}
-                    Save Track
-                  </button>
-                </div>
-              </form>
-            ))}
-            {updateTrackMutation.isError && (
-              <p className="text-sm text-destructive">{updateTrackMutation.error.message}</p>
-            )}
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                          <input
+                            name="title"
+                            defaultValue={track.title}
+                            className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                            placeholder="Track title"
+                          />
+                          <input
+                            name="genre"
+                            defaultValue={track.genre}
+                            className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                            placeholder="Genre"
+                          />
+                          <input
+                            name="price"
+                            defaultValue={track.price.toFixed(2)}
+                            className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                            placeholder="Price"
+                          />
+                          <input
+                            name="bpm"
+                            defaultValue={track.bpm ?? ""}
+                            className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                            placeholder="BPM"
+                          />
+                          <input
+                            name="keySignature"
+                            defaultValue={track.key ?? ""}
+                            className="w-full px-3 py-2.5 bg-secondary razor-border text-sm"
+                            placeholder="Key"
+                          />
+                          <input
+                            type="file"
+                            name="cover"
+                            accept=".jpg,.jpeg,.png,.webp"
+                            className="w-full text-sm"
+                          />
+                          <input
+                            type="file"
+                            name="audio"
+                            accept=".mp3,.wav,.flac,.m4a"
+                            className="w-full text-sm"
+                          />
+                          <div className="flex flex-wrap items-center gap-3">
+                            <label className="flex items-center gap-2 text-xs font-mono-data text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                name="isForSale"
+                                defaultChecked={track.isForSale}
+                              />
+                              For Sale
+                            </label>
+                            <label className="flex items-center gap-2 text-xs font-mono-data text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                name="isVisible"
+                                defaultChecked={track.isVisible}
+                              />
+                              Visible
+                            </label>
+                            <label className="flex items-center gap-2 text-xs font-mono-data text-muted-foreground">
+                              <input type="checkbox" name="syncReleaseCover" defaultChecked />
+                              Sync release cover
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="submit"
+                            disabled={
+                              updateTrackMutation.isPending &&
+                              activeTrackId === track.id
+                            }
+                            className="px-4 py-2.5 bg-foreground text-background font-mono-data hover:bg-accent hover:text-accent-foreground transition-colors press-effect disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                          >
+                            {updateTrackMutation.isPending &&
+                            activeTrackId === track.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <FolderCog className="w-3.5 h-3.5" />
+                            )}
+                            Save Track
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleTrackVisibilityToggle(track.id, !track.isVisible)
+                            }
+                            disabled={setTrackVisibilityMutation.isPending}
+                            className="px-4 py-2.5 razor-border text-muted-foreground hover:text-foreground transition-colors font-mono-data inline-flex items-center gap-2 disabled:opacity-50"
+                          >
+                            {track.isVisible ? (
+                              <EyeOff className="w-3.5 h-3.5" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                            {track.isVisible ? "Hide" : "Unhide"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTrackDelete(track.id, track.title)}
+                            disabled={deleteTrackMutation.isPending}
+                            className="px-4 py-2.5 razor-border text-destructive hover:text-destructive transition-colors font-mono-data inline-flex items-center gap-2 disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
+                          </button>
+                          <span className="font-mono-data text-xs text-muted-foreground inline-flex items-center gap-1">
+                            <FileAudio2 className="w-3 h-3" /> Replace audio from file
+                          </span>
+                        </div>
+                      </form>
+                    ))}
+                  </div>
+                </article>
+              ))}
+
+              {updateReleaseMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {updateReleaseMutation.error.message}
+                </p>
+              )}
+              {updateTrackMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {updateTrackMutation.error.message}
+                </p>
+              )}
+              {setTrackVisibilityMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {setTrackVisibilityMutation.error.message}
+                </p>
+              )}
+              {deleteTrackMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {deleteTrackMutation.error.message}
+                </p>
+              )}
+            </div>
           </section>
 
           <section className="space-y-4">

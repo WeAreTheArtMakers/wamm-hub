@@ -315,6 +315,7 @@ export const api = {
       isForSale?: boolean;
       status?: "DRAFT" | "PUBLISHED" | "ARCHIVED";
       cover?: File;
+      syncTrackCovers?: boolean;
     },
   ) => {
     const formData = new FormData();
@@ -328,6 +329,9 @@ export const api = {
     }
     if (payload.status) formData.append("status", payload.status);
     if (payload.cover) formData.append("cover", payload.cover);
+    if (typeof payload.syncTrackCovers === "boolean") {
+      formData.append("syncTrackCovers", payload.syncTrackCovers ? "true" : "false");
+    }
 
     return request<{ message: string; release: Release }>(
       `/api/studio/releases/${encodeURIComponent(releaseId)}`,
@@ -347,7 +351,10 @@ export const api = {
       bpm?: number;
       keySignature?: string;
       isForSale?: boolean;
+      isVisible?: boolean;
       cover?: File;
+      audio?: File;
+      syncReleaseCover?: boolean;
     },
   ) => {
     const formData = new FormData();
@@ -361,7 +368,14 @@ export const api = {
     if (typeof payload.isForSale === "boolean") {
       formData.append("isForSale", payload.isForSale ? "true" : "false");
     }
+    if (typeof payload.isVisible === "boolean") {
+      formData.append("isVisible", payload.isVisible ? "true" : "false");
+    }
+    if (typeof payload.syncReleaseCover === "boolean") {
+      formData.append("syncReleaseCover", payload.syncReleaseCover ? "true" : "false");
+    }
     if (payload.cover) formData.append("cover", payload.cover);
+    if (payload.audio) formData.append("audio", payload.audio);
 
     return request<{ message: string; track: Track }>(
       `/api/studio/tracks/${encodeURIComponent(trackId)}`,
@@ -371,4 +385,22 @@ export const api = {
       },
     );
   },
+
+  setStudioTrackVisibility: (trackId: string, isVisible: boolean) =>
+    request<{ message: string; track: Track }>(
+      `/api/studio/tracks/${encodeURIComponent(trackId)}/visibility`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ isVisible }),
+      },
+    ),
+
+  deleteStudioTrack: (trackId: string, hardDelete = true) =>
+    request<{ message: string; trackId?: string }>(
+      `/api/studio/tracks/${encodeURIComponent(trackId)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ hardDelete }),
+      },
+    ),
 };

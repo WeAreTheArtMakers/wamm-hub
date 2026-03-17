@@ -50,6 +50,7 @@ export interface Track {
   price: number;
   currency: string;
   isForSale: boolean;
+  isVisible: boolean;
   sourcePath?: string;
   plays: number;
   likes: number;

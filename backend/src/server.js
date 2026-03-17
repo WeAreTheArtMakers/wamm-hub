@@ -167,6 +167,9 @@ if (hasFrontendBuild) {
         include: {
           artist: { select: { name: true } },
           tracks: {
+            where: {
+              isVisible: true,
+            },
             select: {
               coverArtUrl: true,
             },

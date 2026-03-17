@@ -149,6 +149,7 @@ model Track {
   price       Float          @default(0.99)
   currency    String         @default("USD")
   isForSale   Boolean        @default(true)
+  isVisible   Boolean        @default(true)
   sourcePath  String?
   plays       Int            @default(0)
   likes       Int            @default(0)
