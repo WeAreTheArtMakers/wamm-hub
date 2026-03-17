@@ -53,6 +53,7 @@ export default function ReleasePage() {
     queryKey: ["release", slug],
     queryFn: () => api.getReleaseBySlug(slug ?? ""),
     enabled: Boolean(slug),
+    retry: false,
   });
 
   const likeStateQuery = useQuery({
