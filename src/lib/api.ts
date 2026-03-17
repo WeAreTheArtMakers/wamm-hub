@@ -135,6 +135,7 @@ export const api = {
       paymentMethod?: "STRIPE" | "CRYPTO" | "MANUAL";
       walletAddress?: string;
       txHash?: string;
+      platformTxHash?: string;
       ibanReference?: string;
     } = {},
   ) =>
@@ -146,6 +147,7 @@ export const api = {
           paymentMethod: payload.paymentMethod ?? "MANUAL",
           walletAddress: payload.walletAddress,
           txHash: payload.txHash,
+          platformTxHash: payload.platformTxHash,
           ibanReference: payload.ibanReference,
         }),
       },

@@ -23,6 +23,7 @@ const purchaseSchema = z.object({
   paymentMethod: z.enum(["STRIPE", "CRYPTO", "MANUAL"]).default("MANUAL"),
   walletAddress: optionalTrimmedString,
   txHash: optionalTrimmedString,
+  platformTxHash: optionalTrimmedString,
   ibanReference: optionalTrimmedString,
 });
 
@@ -149,9 +150,32 @@ router.post(
             txHash: payload.txHash,
             buyerWallet: payload.walletAddress,
             artistWallet: release.artist.payoutWallet ?? "",
+            expectedAmount: artistPayout,
           })
         : null;
     const cryptoConfig = getCryptoModuleConfig();
+    const requiresPlatformFeeTx =
+      paymentMethod === "CRYPTO" &&
+      cryptoConfig.verifyOnchain &&
+      cryptoConfig.verifyStrict &&
+      !(getCryptoModuleConfig().splitContractAddress || "").trim();
+    if (requiresPlatformFeeTx && !payload.platformTxHash) {
+      res.status(400).json({
+        message:
+          "Platform fee transaction hash is required for strict on-chain verification.",
+      });
+      return;
+    }
+
+    const platformVerification =
+      paymentMethod === "CRYPTO" && payload.platformTxHash
+        ? await verifyCryptoTransaction({
+            txHash: payload.platformTxHash,
+            buyerWallet: payload.walletAddress,
+            artistWallet: PLATFORM_WALLET_ADDRESS,
+            expectedAmount: platformFee,
+          })
+        : null;
 
     if (
       paymentMethod === "CRYPTO" &&
@@ -164,11 +188,25 @@ router.post(
       });
       return;
     }
+    if (
+      paymentMethod === "CRYPTO" &&
+      cryptoConfig.verifyStrict &&
+      platformVerification &&
+      !platformVerification.verified
+    ) {
+      res.status(400).json({
+        message:
+          platformVerification.reason ||
+          "Platform fee transaction could not be verified.",
+      });
+      return;
+    }
 
     const status =
       paymentMethod === "CRYPTO"
         ? cryptoConfig.verifyOnchain
-          ? verification?.verified
+          ? verification?.verified &&
+            (!requiresPlatformFeeTx || Boolean(platformVerification?.verified))
             ? "PAID"
             : "UNDER_REVIEW"
           : "PAID"
@@ -197,7 +235,11 @@ router.post(
         paymentNote:
           paymentMethod === "CRYPTO"
             ? verification?.verified
-              ? `Crypto payment verified on-chain (${release.artist.payoutNetwork || "EVM"}).`
+              ? `Crypto payment verified on-chain (${release.artist.payoutNetwork || "EVM"}).${
+                  payload.platformTxHash
+                    ? ` Platform fee tx: ${payload.platformTxHash}.`
+                    : ""
+                }`
               : verification?.reason ||
                 `Crypto payment accepted (${release.artist.payoutNetwork || "EVM"}).`
             : `IBAN transfer reference: ${payload.ibanReference}`,

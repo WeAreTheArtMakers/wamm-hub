@@ -174,6 +174,7 @@ export interface PurchasePayload {
   paymentMethod?: "STRIPE" | "CRYPTO" | "MANUAL";
   walletAddress?: string;
   txHash?: string;
+  platformTxHash?: string;
   ibanReference?: string;
 }
 

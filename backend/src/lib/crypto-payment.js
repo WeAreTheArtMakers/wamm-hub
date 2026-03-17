@@ -18,6 +18,24 @@ const normalizeAddress = (value) =>
     .trim()
     .toLowerCase();
 
+const normalizeChainIdValue = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    if (/^0x/i.test(raw)) return `0x${BigInt(raw).toString(16)}`;
+    return `0x${BigInt(raw).toString(16)}`;
+  } catch {
+    return raw.toLowerCase();
+  }
+};
+
+const amountToWeiBigInt = (amount) => {
+  const numeric = Number(amount);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0n;
+  const micros = BigInt(Math.round(numeric * 1_000_000));
+  return (micros * 10n ** 18n) / 1_000_000n;
+};
+
 const rpc = async (method, params) => {
   const response = await fetch(rpcUrl, {
     method: "POST",
@@ -69,6 +87,7 @@ export const verifyCryptoTransaction = async ({
   txHash,
   buyerWallet,
   artistWallet,
+  expectedAmount,
 }) => {
   if (!txHash) {
     return {
@@ -116,7 +135,9 @@ export const verifyCryptoTransaction = async ({
       };
     }
 
-    if (expectedChainId && tx.chainId && tx.chainId !== expectedChainId) {
+    const normalizedExpectedChain = normalizeChainIdValue(expectedChainId);
+    const normalizedTxChain = normalizeChainIdValue(tx.chainId);
+    if (normalizedExpectedChain && normalizedTxChain && normalizedTxChain !== normalizedExpectedChain) {
       return {
         state: "wrong_chain",
         verified: false,
@@ -137,6 +158,21 @@ export const verifyCryptoTransaction = async ({
 
     const normalizedSplit = normalizeAddress(splitContractAddress);
     const normalizedArtist = normalizeAddress(artistWallet);
+    const txValueWei = (() => {
+      try {
+        return BigInt(tx.value || "0x0");
+      } catch {
+        return 0n;
+      }
+    })();
+    const expectedWei = amountToWeiBigInt(expectedAmount);
+    if (expectedWei > 0n && txValueWei < expectedWei) {
+      return {
+        state: "insufficient_value",
+        verified: false,
+        reason: "Transaction value is lower than required amount.",
+      };
+    }
 
     if (normalizedSplit) {
       const sentToSplit = to === normalizedSplit;

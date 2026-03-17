@@ -31,6 +31,25 @@ type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 };
 
+const toWeiHex = (amount: number) => {
+  const numeric = Number(amount);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "0x0";
+  const micros = BigInt(Math.round(numeric * 1_000_000));
+  const wei = (micros * 10n ** 18n) / 1_000_000n;
+  return `0x${wei.toString(16)}`;
+};
+
+const normalizeChainIdToHex = (chainId: string) => {
+  const raw = String(chainId || "").trim();
+  if (!raw) return "";
+  try {
+    if (/^0x/i.test(raw)) return `0x${BigInt(raw).toString(16)}`;
+    return `0x${BigInt(raw).toString(16)}`;
+  } catch {
+    return raw;
+  }
+};
+
 export default function ReleasePage() {
   const { slug } = useParams<{ slug: string }>();
   const setTrack = usePlayer((state) => state.setTrack);
@@ -38,6 +57,7 @@ export default function ReleasePage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("MANUAL");
   const [walletAddress, setWalletAddress] = useState("");
   const [txHash, setTxHash] = useState("");
+  const [platformTxHash, setPlatformTxHash] = useState("");
   const [ibanReference, setIbanReference] = useState("");
   const [waveTrackId, setWaveTrackId] = useState<string | null>(null);
   const [likedByMe, setLikedByMe] = useState(false);
@@ -85,15 +105,16 @@ export default function ReleasePage() {
       releaseId: string;
       paymentMethod: PaymentMethod;
       walletAddress?: string;
+      txHash?: string;
+      platformTxHash?: string;
       ibanReference?: string;
     }) => {
       const purchase = await api.purchaseRelease(payload.releaseId, {
         paymentMethod: payload.paymentMethod,
         walletAddress: payload.walletAddress,
-        txHash:
-          payload.paymentMethod === "CRYPTO" && txHash.trim().length
-            ? txHash.trim()
-            : undefined,
+        txHash: payload.paymentMethod === "CRYPTO" ? payload.txHash : undefined,
+        platformTxHash:
+          payload.paymentMethod === "CRYPTO" ? payload.platformTxHash : undefined,
         ibanReference: payload.ibanReference,
       });
       if (
@@ -218,6 +239,49 @@ export default function ReleasePage() {
     }
   };
 
+  const waitForReceipt = async (
+    provider: EthereumProvider,
+    hash: string,
+    timeoutMs = 180000,
+  ) => {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const receipt = await provider.request({
+        method: "eth_getTransactionReceipt",
+        params: [hash],
+      });
+      if (receipt && typeof receipt === "object") {
+        return receipt;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    }
+    throw new Error("Transaction confirmation timed out.");
+  };
+
+  const sendNativeTransfer = async (
+    provider: EthereumProvider,
+    from: string,
+    to: string,
+    amount: number,
+  ) => {
+    const value = toWeiHex(amount);
+    const tx = await provider.request({
+      method: "eth_sendTransaction",
+      params: [
+        {
+          from,
+          to,
+          value,
+        },
+      ],
+    });
+    if (typeof tx !== "string") {
+      throw new Error("Wallet did not return a valid transaction hash.");
+    }
+    await waitForReceipt(provider, tx);
+    return tx;
+  };
+
   const handleBuy = () => {
     if (!sessionUser) {
       window.location.href = "/login";
@@ -239,19 +303,78 @@ export default function ReleasePage() {
       return;
     }
 
-    if (
-      paymentMethod === "CRYPTO" &&
-      cryptoQuoteQuery.data?.quote.requiresTxHash &&
-      txHash.trim().length < 10
-    ) {
-      alert("On-chain verification requires a transaction hash.");
+    if (paymentMethod === "CRYPTO") {
+      const provider = (window as unknown as { ethereum?: EthereumProvider }).ethereum;
+      if (!provider) {
+        alert("No wallet detected. Install MetaMask or another EVM wallet.");
+        return;
+      }
+
+      void (async () => {
+        try {
+          setPurchaseStatus("Preparing crypto payment...");
+          const quotePayload =
+            cryptoQuoteQuery.data ?? (await api.getCryptoQuote(release.id));
+          const expectedChainId = normalizeChainIdToHex(
+            quotePayload.verification.expectedChainId || "",
+          );
+
+          if (expectedChainId) {
+            const current = await provider.request({ method: "eth_chainId" });
+            const currentChainId =
+              typeof current === "string" ? normalizeChainIdToHex(current) : "";
+            if (currentChainId && currentChainId !== expectedChainId) {
+              await provider.request({
+                method: "wallet_switchEthereumChain",
+                params: [{ chainId: expectedChainId }],
+              });
+            }
+          }
+
+          setPurchaseStatus("Please approve artist payout transaction in wallet...");
+          const artistHash = await sendNativeTransfer(
+            provider,
+            walletAddress,
+            artistPayment.wallet,
+            quotePayload.quote.artistPayout,
+          );
+          setTxHash(artistHash);
+
+          setPurchaseStatus("Please approve platform fee transaction in wallet...");
+          const platformHash = await sendNativeTransfer(
+            provider,
+            walletAddress,
+            quotePayload.verification.platformWallet,
+            quotePayload.quote.platformFee,
+          );
+          setPlatformTxHash(platformHash);
+
+          purchaseMutation.mutate({
+            releaseId: release.id,
+            paymentMethod,
+            walletAddress,
+            txHash: artistHash,
+            platformTxHash: platformHash,
+            ibanReference: undefined,
+          });
+        } catch (error) {
+          setPurchaseStatus("");
+          alert(
+            error instanceof Error
+              ? error.message
+              : "Crypto payment could not be completed.",
+          );
+        }
+      })();
       return;
     }
 
     purchaseMutation.mutate({
       releaseId: release.id,
       paymentMethod,
-      walletAddress: paymentMethod === "CRYPTO" ? walletAddress : undefined,
+      walletAddress: undefined,
+      txHash: undefined,
+      platformTxHash: undefined,
       ibanReference: paymentMethod === "MANUAL" ? ibanReference.trim() : undefined,
     });
   };
@@ -418,23 +541,26 @@ export default function ReleasePage() {
                   </button>
                 )}
                 <label className="block text-muted-foreground font-mono-data pt-1">
-                  Blockchain Tx Hash
+                  Artist Payout Tx Hash
                 </label>
                 <input
                   value={txHash}
                   onChange={(event) => setTxHash(event.target.value)}
-                  placeholder={
-                    cryptoQuoteQuery.data?.quote.requiresTxHash
-                      ? "Required for strict verification"
-                      : "Optional (recommended)"
-                  }
+                  placeholder="Auto-filled after wallet payment"
+                  className="w-full px-2 py-2 bg-background razor-border text-foreground"
+                />
+                <label className="block text-muted-foreground font-mono-data pt-1">
+                  Platform Fee Tx Hash
+                </label>
+                <input
+                  value={platformTxHash}
+                  onChange={(event) => setPlatformTxHash(event.target.value)}
+                  placeholder="Auto-filled after wallet payment"
                   className="w-full px-2 py-2 bg-background razor-border text-foreground"
                 />
                 <p className="text-accent">
                   {cryptoQuoteQuery.data?.verification.verifyOnchain
-                    ? cryptoQuoteQuery.data.quote.requiresTxHash
-                      ? "Crypto order is verified on-chain. Tx hash is required."
-                      : "On-chain verification is enabled. Missing tx can fall back to review."
+                    ? "Wallet sends artist payout + platform fee on-chain, then order is verified automatically."
                     : "Crypto purchases unlock download links instantly."}
                 </p>
               </div>

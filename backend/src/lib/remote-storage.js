@@ -53,6 +53,8 @@ export const uploadFileToRemote = async ({
   if (!isRemoteUploadEnabled()) return null;
 
   const buffer = await fs.readFile(localFilePath);
+  const localFileStat = await fs.stat(localFilePath).catch(() => null);
+  const localFileSize = localFileStat?.size ?? 0;
   const form = new FormData();
   form.append("artistSlug", sanitizeSegment(artistSlug, "artist"));
   form.append("releaseSlug", sanitizeSegment(releaseSlug, "release"));
@@ -87,7 +89,15 @@ export const uploadFileToRemote = async ({
       payload && typeof payload === "object" && typeof payload.message === "string"
         ? payload.message
         : text.slice(0, 200);
-    throw new Error(`Remote upload failed (${response.status}): ${message}`);
+    const looksLikePhpUploadLimit =
+      response.status === 400 &&
+      /file is required/i.test(message) &&
+      localFileSize > 0;
+    const sizeMb = localFileSize > 0 ? (localFileSize / (1024 * 1024)).toFixed(2) : "0";
+    const hint = looksLikePhpUploadLimit
+      ? ` Likely PHP upload limit issue (file size ${sizeMb}MB). Set upload_max_filesize/post_max_size in cPanel for /public_html/music.`
+      : "";
+    throw new Error(`Remote upload failed (${response.status}): ${message}${hint}`);
   }
 
   const candidateUrl =
