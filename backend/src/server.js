@@ -798,17 +798,15 @@ if (hasFrontendBuild) {
     const isIndexable =
       exactIndexable.has(pathname) || prefixIndexable.some((prefix) => pathname.startsWith(prefix));
 
-    const meta = {
-      ...defaultSeo,
-      pathname,
-      ...(isIndexable
-        ? {}
-        : {
-            title: "WAMM HUB",
-            robots: "noindex,nofollow,noarchive",
-            includeBaseJsonLd: false,
-          }),
-    };
+    const meta = isIndexable
+      ? { pathname }
+      : {
+          title: "WAMM HUB",
+          description: defaultSeo.description,
+          pathname,
+          robots: "noindex,nofollow,noarchive",
+          includeBaseJsonLd: false,
+        };
 
     res
       .status(200)
