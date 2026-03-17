@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { buildAutoAvatarUrl } from "./avatar.js";
 
 const formatDate = (value) => {
@@ -33,14 +35,37 @@ const isLegacyGeneratedCoverUrl = (value) => {
   return value.toLowerCase().includes("/generated/covers/");
 };
 
+const generatedRoot = path.resolve(process.cwd(), "public/generated");
+
+const sanitizeGeneratedUrl = (value) => {
+  if (!value || typeof value !== "string") return "";
+  const normalized = value.trim();
+  if (!normalized) return "";
+  const isAbsoluteHttp =
+    normalized.startsWith("http://") || normalized.startsWith("https://");
+  if (isAbsoluteHttp) return normalized;
+  if (!normalized.startsWith("/")) return "";
+  if (!normalized.startsWith("/generated/")) return normalized;
+
+  const relativePath = normalized.replace(/^\/generated\//, "");
+  const absolutePath = path.resolve(generatedRoot, relativePath);
+  const withinGeneratedRoot =
+    absolutePath === generatedRoot || absolutePath.startsWith(`${generatedRoot}${path.sep}`);
+  if (!withinGeneratedRoot) return "";
+  if (!fs.existsSync(absolutePath)) return "";
+  return value;
+};
+
 const pickBestTrackCoverUrl = (tracks) => {
   const list = Array.isArray(tracks) ? tracks : [];
-  const remoteCover = list.find(
-    (track) => track?.coverArtUrl && !isLegacyGeneratedCoverUrl(track.coverArtUrl),
-  )?.coverArtUrl;
+  const remoteCover = list
+    .map((track) => sanitizeGeneratedUrl(track?.coverArtUrl))
+    .find((cover) => cover && !isLegacyGeneratedCoverUrl(cover));
   if (remoteCover) return remoteCover;
 
-  const fallback = list.find((track) => track?.coverArtUrl)?.coverArtUrl;
+  const fallback = list
+    .map((track) => sanitizeGeneratedUrl(track?.coverArtUrl))
+    .find(Boolean);
   return fallback ?? "";
 };
 
@@ -52,9 +77,11 @@ export const serializeTrack = (track) => ({
   artistSlug: track.artist?.slug ?? "",
   releaseId: track.releaseId ?? undefined,
   coverArtUrl:
-    isLegacyGeneratedCoverUrl(track.coverArtUrl)
-      ? track.release?.coverArtUrl ?? track.coverArtUrl
-      : track.coverArtUrl ?? track.release?.coverArtUrl ?? "",
+    sanitizeGeneratedUrl(
+      isLegacyGeneratedCoverUrl(track.coverArtUrl)
+        ? track.release?.coverArtUrl ?? track.coverArtUrl
+        : track.coverArtUrl ?? track.release?.coverArtUrl ?? "",
+    ) || "",
   audioUrl: track.audioUrl,
   previewUrl: track.previewUrl ?? track.audioUrl,
   highQualityUrl: track.highQualityUrl ?? undefined,
@@ -81,10 +108,11 @@ export const serializeRelease = (release) => {
   const totalLikes = tracks.reduce((sum, track) => sum + track.likes, 0);
   const communityLikes =
     typeof release._count?.likes === "number" ? release._count.likes : 0;
-  const releaseCover =
+  const releaseCover = sanitizeGeneratedUrl(
     !isLegacyGeneratedCoverUrl(release.coverArtUrl) && release.coverArtUrl
       ? release.coverArtUrl
-      : pickBestTrackCoverUrl(release.tracks);
+      : pickBestTrackCoverUrl(release.tracks),
+  );
 
   return {
     id: release.id,

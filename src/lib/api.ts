@@ -366,6 +366,17 @@ export const api = {
     );
   },
 
+  deleteStudioRelease: (releaseId: string, hardDelete = true) =>
+    request<{
+      message: string;
+      releaseId: string;
+      archived?: boolean;
+      deletedTrackCount?: number;
+    }>(`/api/studio/releases/${encodeURIComponent(releaseId)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ hardDelete }),
+    }),
+
   updateStudioTrack: (
     trackId: string,
     payload: {

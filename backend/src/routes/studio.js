@@ -350,6 +350,10 @@ const logArtistActivity = async ({
 const parseTrackMetadata = async (filePath) => {
   try {
     const metadata = await parseFile(filePath, { duration: true, skipCovers: false });
+    const duration = Math.max(1, Math.round(metadata.format.duration || 0));
+    const hasDuration = Number.isFinite(duration) && duration > 0;
+    const hasAudioCodec = Boolean(metadata.format.codec || metadata.format.container);
+
     return {
       title: metadata.common.title || "",
       genre: metadata.common.genre?.[0] || "",
@@ -359,8 +363,10 @@ const parseTrackMetadata = async (filePath) => {
           : undefined,
       key:
         typeof metadata.common.key === "string" ? metadata.common.key : undefined,
-      duration: Math.max(1, Math.round(metadata.format.duration || 0)),
+      duration,
       picture: metadata.common.picture?.[0] ?? null,
+      isValidAudio: hasDuration || hasAudioCodec,
+      parseError: "",
     };
   } catch {
     return {
@@ -370,8 +376,20 @@ const parseTrackMetadata = async (filePath) => {
       key: undefined,
       duration: 0,
       picture: null,
+      isValidAudio: false,
+      parseError:
+        "Unable to read audio metadata. Please upload a valid MP3/WAV/FLAC/M4A file.",
     };
   }
+};
+
+const assertValidAudioMetadata = (metadata, sourceName) => {
+  if (metadata?.isValidAudio) return;
+  const label = safeText(sourceName, 120) || "audio file";
+  throw new Error(
+    metadata?.parseError ||
+      `Unable to read "${label}". Please upload a valid MP3/WAV/FLAC/M4A file.`,
+  );
 };
 
 const getUniqueReleaseSlug = async (baseSlug) => {
@@ -433,6 +451,7 @@ const createTrackFromUpload = async ({
   await moveFile(file.path, originalPath);
 
   const metadata = await parseTrackMetadata(originalPath);
+  assertValidAudioMetadata(metadata, file.originalname);
   let trackCoverUrl = releaseCoverUrl || "";
 
   const streamUrl = await uploadToRemoteWithFallback({
@@ -1159,6 +1178,149 @@ router.patch(
   }),
 );
 
+router.delete(
+  "/releases/:releaseId",
+  requireArtist,
+  asyncHandler(async (req, res) => {
+    const artist = req.artist;
+    const hardDelete = parseBooleanFlag(req.body?.hardDelete) !== false;
+    const release = await prisma.release.findUnique({
+      where: { id: req.params.releaseId },
+      select: {
+        id: true,
+        title: true,
+        artistId: true,
+      },
+    });
+
+    if (!release || release.artistId !== artist.id) {
+      res.status(404).json({ message: "Release not found." });
+      return;
+    }
+
+    const [trackCount, linkedOrderCount] = await Promise.all([
+      prisma.track.count({
+        where: { releaseId: release.id },
+      }),
+      prisma.order.count({
+        where: {
+          OR: [
+            { releaseId: release.id },
+            {
+              track: {
+                releaseId: release.id,
+              },
+            },
+          ],
+        },
+      }),
+    ]);
+
+    if (!hardDelete) {
+      await prisma.$transaction([
+        prisma.release.update({
+          where: { id: release.id },
+          data: {
+            status: "ARCHIVED",
+            published: false,
+            isForSale: false,
+          },
+        }),
+        prisma.track.updateMany({
+          where: { releaseId: release.id },
+          data: {
+            isVisible: false,
+            isForSale: false,
+          },
+        }),
+      ]);
+
+      await logArtistActivity({
+        artistId: artist.id,
+        actorUserId: req.user?.id ?? null,
+        entityType: "RELEASE",
+        action: "RELEASE_ARCHIVED",
+        details: {
+          releaseId: release.id,
+          title: release.title,
+          reason: linkedOrderCount > 0 ? "HAS_PURCHASE_HISTORY" : "MANUAL_ARCHIVE",
+        },
+      });
+
+      res.json({
+        message:
+          linkedOrderCount > 0
+            ? "Release has purchase history. Archived instead of permanent delete."
+            : "Release archived.",
+        releaseId: release.id,
+        archived: true,
+      });
+      return;
+    }
+
+    const releaseTrackIds = (
+      await prisma.track.findMany({
+        where: { releaseId: release.id },
+        select: { id: true },
+      })
+    ).map((entry) => entry.id);
+
+    await prisma.$transaction(async (tx) => {
+      if (releaseTrackIds.length > 0) {
+        await tx.order.updateMany({
+          where: {
+            trackId: {
+              in: releaseTrackIds,
+            },
+          },
+          data: {
+            trackId: null,
+          },
+        });
+      }
+
+      await tx.order.updateMany({
+        where: {
+          releaseId: release.id,
+        },
+        data: {
+          releaseId: null,
+        },
+      });
+
+      await tx.track.deleteMany({
+        where: { releaseId: release.id },
+      });
+
+      await tx.release.delete({
+        where: { id: release.id },
+      });
+    });
+
+    await logArtistActivity({
+      artistId: artist.id,
+      actorUserId: req.user?.id ?? null,
+      entityType: "RELEASE",
+      action: "RELEASE_DELETED",
+      details: {
+        releaseId: release.id,
+        title: release.title,
+        deletedTrackCount: trackCount,
+        detachedOrderReferences: linkedOrderCount,
+      },
+    });
+
+    res.json({
+      message:
+        linkedOrderCount > 0
+          ? "Release deleted permanently. Existing orders were kept and detached from this release."
+          : "Release deleted permanently.",
+      releaseId: release.id,
+      deletedTrackCount: trackCount,
+    });
+  }),
+);
+
 router.patch(
   "/tracks/:trackId",
   requireArtist,
@@ -1291,6 +1453,7 @@ router.patch(
       const filePath = path.join(trackDir, fileName);
       await moveFile(audioUpload.path, filePath);
       const metadata = await parseTrackMetadata(filePath);
+      assertValidAudioMetadata(metadata, audioUpload.originalname);
 
       const streamUrl = await uploadToRemoteWithFallback({
         localFilePath: filePath,
@@ -1549,80 +1712,160 @@ router.delete(
           isVisible: false,
         },
       });
+
+      await logArtistActivity({
+        artistId: artist.id,
+        actorUserId: req.user?.id ?? null,
+        entityType: "TRACK",
+        action: "TRACK_HIDDEN",
+        details: {
+          trackId: track.id,
+          reason: "DELETE_ENDPOINT_SOFT_HIDE",
+        },
+      });
       res.json({
         message: "Track hidden.",
       });
       return;
     }
 
-    const linkedOrders = await prisma.order.count({
-      where: { trackId: track.id },
-    });
-    if (linkedOrders > 0) {
-      res.status(400).json({
-        message:
-          "Track has purchase history and cannot be permanently deleted. Hide it instead.",
-      });
-      return;
-    }
+    const releaseId = track.releaseId;
+    let shouldDeleteRelease = false;
+    let releaseTrackIds = [];
 
-    if (track.releaseId) {
-      const visibleTrackCount = await prisma.track.count({
+    if (releaseId) {
+      const releaseTrackCount = await prisma.track.count({
         where: {
-          releaseId: track.releaseId,
-          isVisible: true,
+          releaseId,
         },
       });
-      if (visibleTrackCount <= 1) {
-        res.status(400).json({
-          message:
-            "You cannot delete the last visible track in a release. Hide it or upload a replacement first.",
+
+      if (releaseTrackCount <= 1) {
+        shouldDeleteRelease = true;
+        releaseTrackIds = (
+          await prisma.track.findMany({
+            where: { releaseId },
+            select: { id: true },
+          })
+        ).map((entry) => entry.id);
+      }
+    }
+
+    const detachedOrderReferences =
+      releaseId && shouldDeleteRelease
+        ? await prisma.order.count({
+            where: {
+              OR: [
+                { releaseId },
+                {
+                  trackId: {
+                    in: releaseTrackIds,
+                  },
+                },
+              ],
+            },
+          })
+        : await prisma.order.count({
+            where: { trackId: track.id },
+          });
+
+    await prisma.$transaction(async (tx) => {
+      if (releaseId && shouldDeleteRelease) {
+        if (releaseTrackIds.length > 0) {
+          await tx.order.updateMany({
+            where: {
+              trackId: {
+                in: releaseTrackIds,
+              },
+            },
+            data: {
+              trackId: null,
+            },
+          });
+        }
+
+        await tx.order.updateMany({
+          where: {
+            releaseId,
+          },
+          data: {
+            releaseId: null,
+          },
         });
+
+        await tx.track.deleteMany({
+          where: {
+            releaseId,
+          },
+        });
+
+        await tx.release.delete({
+          where: { id: releaseId },
+        });
+
         return;
       }
-    }
 
-    await prisma.track.delete({
-      where: {
-        id: track.id,
-      },
-    });
-
-    if (track.releaseId && track.release?.coverArtUrl === track.coverArtUrl) {
-      const replacementCover = await prisma.track.findFirst({
+      await tx.order.updateMany({
         where: {
-          releaseId: track.releaseId,
-          isVisible: true,
-          coverArtUrl: {
-            not: null,
-          },
+          trackId: track.id,
         },
-        orderBy: { createdAt: "asc" },
-        select: {
-          coverArtUrl: true,
+        data: {
+          trackId: null,
         },
       });
-      if (replacementCover?.coverArtUrl) {
-        await prisma.release.update({
-          where: { id: track.releaseId },
-          data: { coverArtUrl: replacementCover.coverArtUrl },
+
+      await tx.track.delete({
+        where: {
+          id: track.id,
+        },
+      });
+
+      if (releaseId && track.release?.coverArtUrl === track.coverArtUrl) {
+        const replacementCover = await tx.track.findFirst({
+          where: {
+            releaseId,
+            isVisible: true,
+            coverArtUrl: {
+              not: null,
+            },
+          },
+          orderBy: { createdAt: "asc" },
+          select: {
+            coverArtUrl: true,
+          },
+        });
+
+        await tx.release.update({
+          where: { id: releaseId },
+          data: { coverArtUrl: replacementCover?.coverArtUrl ?? null },
         });
       }
-    }
+    });
 
     await logArtistActivity({
       artistId: artist.id,
       actorUserId: req.user?.id ?? null,
-      entityType: "TRACK",
-      action: "TRACK_DELETED",
+      entityType: shouldDeleteRelease ? "RELEASE" : "TRACK",
+      action: shouldDeleteRelease ? "TRACK_AND_RELEASE_DELETED" : "TRACK_DELETED",
       details: {
         trackId: track.id,
+        releaseId: releaseId ?? null,
+        detachedOrderReferences,
       },
     });
 
     res.json({
-      message: "Track deleted permanently.",
+      message: shouldDeleteRelease
+        ? detachedOrderReferences > 0
+          ? "Track and release deleted permanently. Existing order links were detached."
+          : "Track and empty release deleted permanently."
+        : detachedOrderReferences > 0
+          ? "Track deleted permanently. Existing order links were detached."
+          : "Track deleted permanently.",
       trackId: track.id,
+      releaseDeleted: shouldDeleteRelease,
+      detachedOrderReferences,
     });
   }),
 );

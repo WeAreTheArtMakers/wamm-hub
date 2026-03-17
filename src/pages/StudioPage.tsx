@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
+  Archive,
   ArrowLeft,
   CheckCircle2,
   Eye,
@@ -112,7 +113,9 @@ export default function StudioPage() {
   const [clearBanner, setClearBanner] = useState(false);
 
   const [activeReleaseId, setActiveReleaseId] = useState<string | null>(null);
+  const [activeReleaseDeleteId, setActiveReleaseDeleteId] = useState<string | null>(null);
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [activeTrackDeleteId, setActiveTrackDeleteId] = useState<string | null>(null);
   const [activeTrackUploadReleaseId, setActiveTrackUploadReleaseId] = useState<string | null>(
     null,
   );
@@ -208,6 +211,18 @@ export default function StudioPage() {
     onSettled: () => setActiveTrackUploadReleaseId(null),
   });
 
+  const deleteReleaseMutation = useMutation({
+    mutationFn: ({
+      releaseId,
+      hardDelete,
+    }: {
+      releaseId: string;
+      hardDelete: boolean;
+    }) => api.deleteStudioRelease(releaseId, hardDelete),
+    onSuccess: invalidateStudioData,
+    onSettled: () => setActiveReleaseDeleteId(null),
+  });
+
   const setTrackVisibilityMutation = useMutation({
     mutationFn: ({
       trackId,
@@ -220,8 +235,15 @@ export default function StudioPage() {
   });
 
   const deleteTrackMutation = useMutation({
-    mutationFn: (trackId: string) => api.deleteStudioTrack(trackId, true),
+    mutationFn: ({
+      trackId,
+      hardDelete,
+    }: {
+      trackId: string;
+      hardDelete: boolean;
+    }) => api.deleteStudioTrack(trackId, hardDelete),
     onSuccess: invalidateStudioData,
+    onSettled: () => setActiveTrackDeleteId(null),
   });
 
   const handleUploadSubmit = (event: React.FormEvent) => {
@@ -348,7 +370,32 @@ export default function StudioPage() {
       `Delete "${trackTitle}" permanently? This cannot be undone.`,
     );
     if (!ok) return;
-    deleteTrackMutation.mutate(trackId);
+    setActiveTrackDeleteId(trackId);
+    deleteTrackMutation.mutate({
+      trackId,
+      hardDelete: true,
+    });
+  };
+
+  const handleReleaseArchiveOrDelete = (
+    releaseId: string,
+    releaseTitle: string,
+    hardDelete: boolean,
+  ) => {
+    const ok = hardDelete
+      ? window.confirm(
+          `Permanently delete "${releaseTitle}" and its tracks? This cannot be undone.`,
+        )
+      : window.confirm(
+          `Archive "${releaseTitle}"? It will be hidden from public pages.`,
+        );
+    if (!ok) return;
+
+    setActiveReleaseDeleteId(releaseId);
+    deleteReleaseMutation.mutate({
+      releaseId,
+      hardDelete,
+    });
   };
 
   const handleAddTracksSubmit = (
@@ -743,6 +790,34 @@ export default function StudioPage() {
                             Publish
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleReleaseArchiveOrDelete(release.id, release.title, false)
+                          }
+                          disabled={
+                            deleteReleaseMutation.isPending &&
+                            activeReleaseDeleteId === release.id
+                          }
+                          className="px-3 py-2 razor-border text-muted-foreground hover:text-foreground transition-colors font-mono-data inline-flex items-center gap-2 disabled:opacity-50"
+                        >
+                          <Archive className="w-3.5 h-3.5" />
+                          Archive
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleReleaseArchiveOrDelete(release.id, release.title, true)
+                          }
+                          disabled={
+                            deleteReleaseMutation.isPending &&
+                            activeReleaseDeleteId === release.id
+                          }
+                          className="px-3 py-2 razor-border text-destructive hover:text-destructive transition-colors font-mono-data inline-flex items-center gap-2 disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete
+                        </button>
                       </div>
                     </div>
 
@@ -1028,11 +1103,19 @@ export default function StudioPage() {
                           <button
                             type="button"
                             onClick={() => handleTrackDelete(track.id, track.title)}
-                            disabled={deleteTrackMutation.isPending}
+                            disabled={
+                              deleteTrackMutation.isPending &&
+                              activeTrackDeleteId === track.id
+                            }
                             className="px-4 py-2.5 razor-border text-destructive hover:text-destructive transition-colors font-mono-data inline-flex items-center gap-2 disabled:opacity-50"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            Delete
+                            {deleteTrackMutation.isPending &&
+                            activeTrackDeleteId === track.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                            Delete Track
                           </button>
                           <span className="font-mono-data text-xs text-muted-foreground inline-flex items-center gap-1">
                             <FileAudio2 className="w-3 h-3" /> Replace audio from file
@@ -1062,6 +1145,11 @@ export default function StudioPage() {
               {deleteTrackMutation.isError && (
                 <p className="text-sm text-destructive">
                   {deleteTrackMutation.error.message}
+                </p>
+              )}
+              {deleteReleaseMutation.isError && (
+                <p className="text-sm text-destructive">
+                  {deleteReleaseMutation.error.message}
                 </p>
               )}
               {addTracksToReleaseMutation.isError && (
